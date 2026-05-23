@@ -442,6 +442,7 @@
       <div class="panel">
         <div class="h">Published Report</div>
         <div class="body"><a id="r-cited" href="#" target="_blank" rel="noopener">—</a></div>
+        <div class="row"><span class="k">Senso prompt</span><span class="v" id="r-senso">—</span></div>
         <div class="row"><span class="k">Tx hash</span><span class="v" id="r-tx">—</span></div>
         <div class="row"><span class="k">Sources</span><span class="v" id="r-sources">—</span></div>
         <div class="row"><span class="k">Benchmark</span><span class="v" id="r-bench">—</span></div>
@@ -567,6 +568,19 @@
     const tx = r.payment && r.payment.tx_hash;
     document.getElementById("r-tx").textContent = tx ? (tx.slice(0, 18) + "…") : "—";
     document.getElementById("r-sources").textContent = r.sources_count ?? "—";
+
+    const sensoEl = document.getElementById("r-senso");
+    if (r.senso_prompt_id) {
+      const short = r.senso_prompt_id.slice(0, 8) + "…";
+      const status = r.publish_fallback
+        ? (r.senso_publish_message ? ` (${r.senso_publish_message.slice(0, 32)})` : " (fallback)")
+        : " · published";
+      sensoEl.textContent = short + status;
+      sensoEl.title = "Senso prompt: " + r.senso_prompt_id + (r.senso_publish_message ? "\n" + r.senso_publish_message : "");
+    } else {
+      sensoEl.textContent = "—";
+      sensoEl.removeAttribute("title");
+    }
 
     let benchTxt = "—";
     if (r.benchmark) {

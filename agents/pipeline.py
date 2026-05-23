@@ -307,9 +307,18 @@ async def publisher_agent(report: Dict[str, Any], cb: ProgressCb) -> Dict[str, A
         _annotate(
             input_data=f"company={report['company_name']}, report_id={report['report_id']}",
             output_data=out.get("cited_url", ""),
+            metadata={
+                "prompt_id": out.get("prompt_id", ""),
+                "publish_status": out.get("publish_status", ""),
+                "publish_message": out.get("publish_message", ""),
+            },
             tags={"agent": "publish", "tool": "senso", "fallback": out.get("fallback", False)},
         )
-    await _emit(cb, "publish", f"Publisher Agent complete — live at {out['cited_url']}")
+    if out.get("prompt_id") and out.get("fallback"):
+        msg = f"Publisher Agent complete — Senso prompt {out['prompt_id'][:8]}… created ({out.get('publish_message','')})"
+    else:
+        msg = f"Publisher Agent complete — live at {out['cited_url']}"
+    await _emit(cb, "publish", msg)
     return out
 
 
@@ -397,6 +406,9 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         )
         report["cited_url"] = pub.get("cited_url", "")
         report["publish_fallback"] = pub.get("fallback", False)
+        report["senso_prompt_id"] = pub.get("prompt_id", None)
+        report["senso_publish_status"] = pub.get("publish_status", "")
+        report["senso_publish_message"] = pub.get("publish_message", "")
 
         # Persist report to ClickHouse before payment (best effort)
         await asyncio.to_thread(clickhouse_client.insert_report, report)
