@@ -557,12 +557,16 @@
     });
 
     const citedA = document.getElementById("r-cited");
-    if (r.cited_url && !r.publish_fallback) {
-      // Real published URL — clickable
+    if (r.cited_url && (!r.publish_fallback || r.served_locally)) {
+      // Real published URL OR our own /r/{slug} fallback URL — clickable
       citedA.textContent = r.cited_url;
       citedA.href = r.cited_url;
-      citedA.style.color = "var(--purple)";
-      citedA.removeAttribute("title");
+      citedA.style.color = r.served_locally ? "var(--teal)" : "var(--purple)";
+      citedA.style.cursor = "pointer";
+      citedA.title = r.served_locally
+        ? "Published locally — judges can click to view the full DD report"
+        : "View on cited.md";
+      citedA.onclick = null;
     } else if (r.senso_prompt_id) {
       // Senso prompt was created but publish blocked (no destination selected)
       citedA.textContent = "Senso · pending destination selection";
