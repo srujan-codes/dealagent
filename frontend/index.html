@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>DealAgent — Autonomous Due Diligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface-2: #161620;
+    --border: #22222e;
+    --text: #e5e7eb;
+    --muted: #8b8ba0;
+    --purple: #7c6dfa;
+    --teal: #00d4aa;
+    --red: #ff5a6b;
+    --orange: #ffaa3b;
+    --green: #3ddc97;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(124, 109, 250, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124, 109, 250, 0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 56px 24px 80px;
+  }
+  /* Header */
+  .badge {
+    display: inline-block;
+    font-size: 11px; letter-spacing: 2px;
+    color: var(--purple);
+    border: 1px solid var(--purple);
+    padding: 6px 12px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    margin-bottom: 18px;
+  }
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 64px; font-weight: 800;
+    margin: 0 0 10px;
+    letter-spacing: -1.5px;
+    background: linear-gradient(90deg, #fff, var(--purple));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    max-width: 640px;
+    line-height: 1.55;
+    margin: 0 0 28px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stat .v {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px; font-weight: 700;
+    color: var(--teal);
+    line-height: 1;
+  }
+  .stat .l {
+    font-size: 11px; letter-spacing: 1px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-top: 6px;
+  }
+  /* Input */
+  .input-row {
+    display: flex; gap: 10px;
+    margin-bottom: 28px;
+  }
+  input[type=text] {
+    flex: 1;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: 'Space Mono', monospace;
+    font-size: 15px;
+    outline: none;
+    transition: border-color .15s ease;
+  }
+  input[type=text]:focus { border-color: var(--purple); }
+  button {
+    background: var(--purple);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0 22px;
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* Agent rows */
+  .agents { display: flex; flex-direction: column; gap: 10px; margin-bottom: 30px; }
+  .agent {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    display: grid;
+    grid-template-columns: 28px 200px 1fr auto;
+    gap: 14px;
+    align-items: center;
+    transition: border-color .25s ease, background .25s ease;
+  }
+  .agent .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #2a2a36;
+    box-shadow: 0 0 0 0 transparent;
+  }
+  .agent .name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .agent .msg {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .agent .tag {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .agent.active {
+    border-color: var(--purple);
+    background: linear-gradient(180deg, rgba(124, 109, 250, 0.08), transparent);
+  }
+  .agent.active .dot {
+    background: var(--purple);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .agent.active .msg { color: var(--text); }
+  .agent.done {
+    border-color: var(--teal);
+  }
+  .agent.done .dot { background: var(--teal); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(124,109,250,0.6); }
+    50%      { box-shadow: 0 0 0 8px rgba(124,109,250,0); }
+  }
+
+  /* Report */
+  .report {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 26px;
+    margin-bottom: 18px;
+    display: none;
+  }
+  .report.show { display: block; }
+  .report-head {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  .report-head .co {
+    font-family: 'Syne', sans-serif;
+    font-size: 30px; font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .verdict {
+    background: rgba(124,109,250,0.1);
+    border: 1px solid var(--purple);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--purple);
+  }
+  .scores {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .score {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .score .lbl {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .score .v {
+    font-family: 'Syne', sans-serif;
+    font-size: 44px; font-weight: 800;
+    line-height: 1;
+    margin: 8px 0 10px;
+  }
+  .score .reason {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+    min-height: 54px;
+  }
+  .score .src {
+    display: block;
+    font-size: 10px;
+    color: var(--purple);
+    margin-top: 8px;
+    word-break: break-all;
+    text-decoration: none;
+  }
+  .score .src:hover { text-decoration: underline; }
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .panel {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .panel .h {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .panel .big {
+    font-family: 'Syne', sans-serif;
+    font-size: 36px;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--teal);
+  }
+  .panel .body { font-size: 13px; color: var(--text); line-height: 1.55; margin-top: 6px; }
+  .panel a { color: var(--purple); word-break: break-all; }
+  .panel .row { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .panel .row .k { color: var(--muted); }
+  .panel .row .v { color: var(--text); word-break: break-all; }
+
+  /* Sponsor pills */
+  .sponsors {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    justify-content: center;
+    margin-top: 30px;
+  }
+  .pill {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 999px;
+    text-transform: uppercase;
+  }
+
+  .err {
+    background: rgba(255,90,107,0.08);
+    border: 1px solid var(--red);
+    color: var(--red);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+    display: none;
+  }
+  .err.show { display: block; }
+
+  @media (max-width: 800px) {
+    h1 { font-size: 44px; }
+    .stats, .scores, .panels { grid-template-columns: 1fr 1fr; }
+    .agent { grid-template-columns: 24px 1fr; }
+    .agent .tag, .agent .name { grid-column: 2; }
+    .agent .msg { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="badge">Autonomous Due Diligence</span>
+  <h1>DealAgent</h1>
+  <p class="subtitle">Type a company. Five agents fire autonomously. Live web data, cited scoring, historical benchmark, published report, agent-to-agent payment — in under four minutes.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="v">4 min</div><div class="l">vs 20 hrs</div></div>
+    <div class="stat"><div class="v">$1.00</div><div class="l">vs $2,000</div></div>
+    <div class="stat"><div class="v">5</div><div class="l">specialized agents</div></div>
+    <div class="stat"><div class="v">0</div><div class="l">humans in loop</div></div>
+  </div>
+
+  <div class="input-row">
+    <input id="company" type="text" placeholder="Anthropic, Stripe, OpenAI, ..." autocomplete="off" />
+    <button id="run">Run DealAgent →</button>
+  </div>
+
+  <div id="error" class="err"></div>
+
+  <div class="agents">
+    <div class="agent" data-agent="research">
+      <div class="dot"></div>
+      <div class="name">Research Agent</div>
+      <div class="msg">Idle — will pull live web data via Nimble.</div>
+      <div class="tag">Nimble</div>
+    </div>
+    <div class="agent" data-agent="scoring">
+      <div class="dot"></div>
+      <div class="name">Scoring Agent</div>
+      <div class="msg">Idle — will score team/market/traction/risk with citations.</div>
+      <div class="tag">Claude LLM</div>
+    </div>
+    <div class="agent" data-agent="benchmark">
+      <div class="dot"></div>
+      <div class="name">Benchmark Agent</div>
+      <div class="msg">Idle — will compare to historical deals.</div>
+      <div class="tag">ClickHouse</div>
+    </div>
+    <div class="agent" data-agent="publish">
+      <div class="dot"></div>
+      <div class="name">Publisher Agent</div>
+      <div class="msg">Idle — will publish cited report to cited.md.</div>
+      <div class="tag">Senso</div>
+    </div>
+    <div class="agent" data-agent="payment">
+      <div class="dot"></div>
+      <div class="name">Payment Agent</div>
+      <div class="msg">Idle — will pay 1.00 USDC on Base.</div>
+      <div class="tag">x402</div>
+    </div>
+  </div>
+
+  <div id="report" class="report">
+    <div class="report-head">
+      <div class="co" id="r-company">—</div>
+      <div class="verdict" id="r-verdict">—</div>
+    </div>
+    <div class="scores" id="r-scores"></div>
+    <div class="panels">
+      <div class="panel">
+        <div class="h">Overall Score</div>
+        <div class="big" id="r-overall">—</div>
+        <div class="body" id="r-key-insight">—</div>
+      </div>
+      <div class="panel">
+        <div class="h">Published Report</div>
+        <div class="body"><a id="r-cited" href="#" target="_blank" rel="noopener">—</a></div>
+        <div class="row"><span class="k">Tx hash</span><span class="v" id="r-tx">—</span></div>
+        <div class="row"><span class="k">Sources</span><span class="v" id="r-sources">—</span></div>
+        <div class="row"><span class="k">Benchmark</span><span class="v" id="r-bench">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sponsors">
+    <span class="pill">Nimble · Web Intelligence</span>
+    <span class="pill">Anthropic · Claude</span>
+    <span class="pill">ClickHouse · Cloud</span>
+    <span class="pill">Senso · cited.md</span>
+    <span class="pill">x402 · CDP / Base</span>
+    <span class="pill">Datadog · LLM Obs</span>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  const AGENT_ORDER = ["research", "scoring", "benchmark", "publish", "payment"];
+  const input  = document.getElementById("company");
+  const button = document.getElementById("run");
+  const errBox = document.getElementById("error");
+  const report = document.getElementById("report");
+
+  let eventSource = null;
+
+  function showErr(msg) {
+    errBox.textContent = msg;
+    errBox.classList.add("show");
+  }
+  function hideErr() { errBox.classList.remove("show"); }
+
+  function setAgentState(stage, state, message) {
+    const el = document.querySelector(`.agent[data-agent="${stage}"]`);
+    if (!el) return;
+    el.classList.remove("active", "done");
+    if (state) el.classList.add(state);
+    if (message != null) {
+      el.querySelector(".msg").textContent = message;
+    }
+  }
+
+  function activateAgent(stage, message) {
+    // mark all earlier agents as done if still active
+    const idx = AGENT_ORDER.indexOf(stage);
+    AGENT_ORDER.forEach((s, i) => {
+      if (i < idx) {
+        const el = document.querySelector(`.agent[data-agent="${s}"]`);
+        if (el && !el.classList.contains("done")) {
+          el.classList.remove("active");
+          el.classList.add("done");
+        }
+      }
+    });
+    setAgentState(stage, "active", message);
+  }
+
+  function completeAgent(stage, message) {
+    setAgentState(stage, "done", message);
+  }
+
+  function resetAgents() {
+    AGENT_ORDER.forEach((s) => setAgentState(s, null, null));
+    report.classList.remove("show");
+    hideErr();
+  }
+
+  function colorForScore(v, inverse=false) {
+    // inverse=true means higher v is worse (used for risk)
+    const score = inverse ? (10 - v) : v;
+    if (score >= 7) return "var(--green)";
+    if (score >= 4) return "var(--orange)";
+    return "var(--red)";
+  }
+
+  function renderReport(r) {
+    document.getElementById("r-company").textContent = r.company_name || "—";
+    document.getElementById("r-verdict").textContent = r.verdict || "—";
+    document.getElementById("r-overall").textContent = (r.overall_score ?? 0).toFixed(1) + " / 10";
+    document.getElementById("r-key-insight").textContent = r.key_insight || "";
+
+    const scoresEl = document.getElementById("r-scores");
+    scoresEl.innerHTML = "";
+    const dims = [
+      ["team", "Team"], ["market", "Market"],
+      ["traction", "Traction"], ["risk", "Risk"]
+    ];
+    dims.forEach(([key, label]) => {
+      const s = (r.scores && r.scores[key]) || {};
+      const v = Number(s.score ?? 0);
+      const color = colorForScore(v, key === "risk");
+      const div = document.createElement("div");
+      div.className = "score";
+      div.innerHTML = `
+        <div class="lbl">${label}${key === "risk" ? " (lower = better)" : ""}</div>
+        <div class="v" style="color:${color}">${v}</div>
+        <div class="reason">${escapeHtml(s.reasoning || "")}</div>
+        ${s.source ? `<a class="src" href="${escapeAttr(s.source)}" target="_blank" rel="noopener">${escapeHtml(s.source)}</a>` : ""}
+      `;
+      scoresEl.appendChild(div);
+    });
+
+    const citedA = document.getElementById("r-cited");
+    if (r.cited_url) {
+      citedA.textContent = r.cited_url;
+      citedA.href = r.cited_url;
+    } else {
+      citedA.textContent = "—";
+      citedA.removeAttribute("href");
+    }
+
+    const tx = r.payment && r.payment.tx_hash;
+    document.getElementById("r-tx").textContent = tx ? (tx.slice(0, 18) + "…") : "—";
+    document.getElementById("r-sources").textContent = r.sources_count ?? "—";
+
+    let benchTxt = "—";
+    if (r.benchmark) {
+      if (r.benchmark.total_in_db && r.benchmark.this_company_vs_avg) {
+        benchTxt = `${r.benchmark.this_company_vs_avg} avg by ${Math.abs(r.benchmark.delta ?? 0)} (n=${r.benchmark.total_in_db})`;
+      } else if (r.benchmark.note) {
+        benchTxt = r.benchmark.note;
+      }
+    }
+    document.getElementById("r-bench").textContent = benchTxt;
+
+    report.classList.add("show");
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  function start() {
+    const company = input.value.trim();
+    if (!company) { showErr("Enter a company name."); return; }
+    if (eventSource) { eventSource.close(); eventSource = null; }
+
+    resetAgents();
+    button.disabled = true;
+    button.textContent = "Running...";
+
+    eventSource = new EventSource(`/api/analyze/stream?company=${encodeURIComponent(company)}`);
+    eventSource.onmessage = (ev) => {
+      let data;
+      try { data = JSON.parse(ev.data); } catch (e) { return; }
+      const { stage, message, report: r } = data;
+      if (stage === "start") return;
+      if (stage === "error") { showErr(message || "Error"); finish(); return; }
+      if (stage === "complete") { /* nothing */ return; }
+      if (stage === "report") {
+        // mark final agent done before rendering
+        completeAgent("payment", document.querySelector('.agent[data-agent="payment"] .msg').textContent);
+        renderReport(r);
+        finish();
+        return;
+      }
+      // It's an agent stage event
+      if (AGENT_ORDER.includes(stage)) {
+        const isComplete = /complete/i.test(message || "");
+        if (isComplete) completeAgent(stage, message);
+        else activateAgent(stage, message);
+      }
+    };
+    eventSource.onerror = () => {
+      showErr("Stream disconnected.");
+      finish();
+    };
+  }
+
+  function finish() {
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    button.disabled = false;
+    button.textContent = "Run DealAgent →";
+  }
+
+  button.addEventListener("click", start);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
+})();
+</script>
+</body>
+</html>

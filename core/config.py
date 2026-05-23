@@ -1,0 +1,56 @@
+"""Centralized config loader. Reads .env once at import time."""
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
+
+# Anthropic
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# Nimble
+NIMBLE_API_KEY = os.getenv("NIMBLE_API_KEY", "")
+NIMBLE_URL = "https://nimble-retriever.webit.live/search"
+
+# ClickHouse
+CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST", "")
+CLICKHOUSE_PORT = int(os.getenv("CLICKHOUSE_PORT", "8443"))
+CLICKHOUSE_USER = os.getenv("CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "")
+CLICKHOUSE_DATABASE = os.getenv("CLICKHOUSE_DATABASE", "dealagent")
+
+# Senso
+SENSO_API_KEY = os.getenv("SENSO_API_KEY", "")
+SENSO_URL = "https://api.senso.ai/v1/citeables"
+
+# x402 / CDP
+CDP_API_KEY_NAME = os.getenv("CDP_API_KEY_NAME", "")
+CDP_API_KEY_PRIVATE_KEY = os.getenv("CDP_API_KEY_PRIVATE_KEY", "")
+AGENT_WALLET_ADDRESS = os.getenv("AGENT_WALLET_ADDRESS", "0xAutonomousResearchAgent")
+
+# Datadog
+DD_API_KEY = os.getenv("DD_API_KEY", "")
+DD_SITE = os.getenv("DD_SITE", "datadoghq.com")
+DD_SERVICE = os.getenv("DD_SERVICE", "dealagent")
+DD_ENV = os.getenv("DD_ENV", "hackathon")
+
+# Pipeline
+HTTP_TIMEOUT = 30.0
+
+
+def have_anthropic() -> bool:
+    return bool(ANTHROPIC_API_KEY)
+
+
+def have_nimble() -> bool:
+    return bool(NIMBLE_API_KEY)
+
+
+def have_clickhouse() -> bool:
+    return bool(CLICKHOUSE_HOST and CLICKHOUSE_PASSWORD)
+
+
+def have_senso() -> bool:
+    return bool(SENSO_API_KEY)
