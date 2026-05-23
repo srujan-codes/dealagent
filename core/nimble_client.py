@@ -32,14 +32,16 @@ async def _search_one(client: httpx.AsyncClient, query: str) -> List[Dict[str, A
         if resp.status_code != 200:
             return _mock_results(query)
         data = resp.json()
-        body = data.get("body") or data.get("results") or []
+        # Nimble returns: {results: [{title, description, url, metadata: {...}}], ...}
+        items = data.get("results") or data.get("body") or []
         out: List[Dict[str, Any]] = []
-        for item in body[:8]:
-            meta = item.get("metadata", item)
+        for item in items[:8]:
+            # Prefer top-level fields; fall back to nested metadata for older shapes
+            meta = item.get("metadata", {}) if isinstance(item, dict) else {}
             out.append({
-                "title": meta.get("title", "") or meta.get("name", ""),
-                "snippet": meta.get("snippet", "") or meta.get("description", ""),
-                "url": meta.get("url", "") or meta.get("link", ""),
+                "title": item.get("title", "") or meta.get("title", "") or item.get("name", ""),
+                "snippet": item.get("description", "") or item.get("snippet", "") or meta.get("snippet", ""),
+                "url": item.get("url", "") or item.get("link", "") or meta.get("url", ""),
             })
         return out
     except Exception:
