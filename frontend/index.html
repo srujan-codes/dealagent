@@ -566,9 +566,11 @@
     } else if (r.senso_prompt_id) {
       // Senso prompt was created but publish blocked (no destination selected)
       citedA.textContent = "Senso · pending destination selection";
-      citedA.href = "https://app.senso.ai/destinations";
+      citedA.removeAttribute("href");
       citedA.style.color = "var(--muted)";
+      citedA.style.cursor = "default";
       citedA.title = r.senso_publish_message || "Toggle a destination ON in Senso to publish";
+      citedA.onclick = (e) => e.preventDefault();
     } else {
       citedA.textContent = "—";
       citedA.removeAttribute("href");
