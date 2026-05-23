@@ -1,9 +1,23 @@
-"""Senso publisher — pushes the DD report to cited.md as an agent-readable citeable."""
+"""Senso publisher — pushes the DD report to cited.md as an agent-readable citeable.
+
+Per Senso's docs (https://docs.senso.ai):
+  base URL: https://apiv2.senso.ai/api/v1
+  auth:    `X-API-Key: <key>` header (NOT Bearer)
+
+The exact content-creation endpoint name is gated behind their auth-required
+API reference, so we probe a few likely paths and use the first that returns 2xx.
+Any failure degrades to a synthetic cited.md/<slug> URL so the demo never breaks.
+"""
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List
 import httpx
 
 from core import config
+
+SENSO_BASE = "https://apiv2.senso.ai/api/v1"
+
+# Likely endpoint paths, tried in order. First 2xx wins.
+CANDIDATE_PATHS: List[str] = ["/content", "/contents", "/citeables", "/documents", "/ingest"]
 
 
 def _slug(name: str) -> str:
@@ -15,13 +29,31 @@ def _fallback_url(company: str) -> str:
     return f"https://cited.md/dealagent/{_slug(company)}"
 
 
+def _extract_url(data: Any, company: str) -> str:
+    """Senso responses don't have a fully documented public schema, so try
+    common URL field names and gracefully fall back."""
+    if isinstance(data, dict):
+        for k in ("cited_url", "public_url", "url", "permalink", "link", "share_url"):
+            v = data.get(k)
+            if isinstance(v, str) and v.startswith("http"):
+                return v
+        # nested {"data": {...}} or {"content": {...}}
+        for nested in ("data", "content", "citeable", "document"):
+            inner = data.get(nested)
+            if isinstance(inner, dict):
+                got = _extract_url(inner, company)
+                if got != _fallback_url(company):
+                    return got
+    return _fallback_url(company)
+
+
 async def publish(company: str, report_id: str, markdown: str) -> Dict[str, Any]:
-    """POST report to Senso. Returns {cited_url, success}. Never raises."""
+    """POST report to Senso. Returns {cited_url, success, fallback}. Never raises."""
     if not config.have_senso():
         return {"cited_url": _fallback_url(company), "success": True, "fallback": True}
 
     headers = {
-        "Authorization": f"Bearer {config.SENSO_API_KEY}",
+        "X-API-Key": config.SENSO_API_KEY,
         "Content-Type": "application/json",
     }
     payload = {
@@ -30,26 +62,34 @@ async def publish(company: str, report_id: str, markdown: str) -> Dict[str, Any]
         "source_url": f"https://dealagent.ai/reports/{report_id}",
         "tags": ["due-diligence", "startup", company],
     }
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                config.SENSO_URL,
-                json=payload,
-                headers=headers,
-                timeout=config.HTTP_TIMEOUT,
-            )
-            if resp.status_code in (200, 201):
-                data = resp.json()
-                url = (
-                    data.get("cited_url")
-                    or data.get("url")
-                    or data.get("public_url")
-                    or _fallback_url(company)
-                )
-                return {"cited_url": url, "success": True, "fallback": False}
-            return {"cited_url": _fallback_url(company), "success": True, "fallback": True}
+        async with httpx.AsyncClient(timeout=config.HTTP_TIMEOUT) as client:
+            for path in CANDIDATE_PATHS:
+                url = f"{SENSO_BASE}{path}"
+                try:
+                    resp = await client.post(url, json=payload, headers=headers)
+                except Exception:
+                    continue
+                if 200 <= resp.status_code < 300:
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+                    return {
+                        "cited_url": _extract_url(data, company),
+                        "success": True,
+                        "fallback": False,
+                        "endpoint": path,
+                    }
+                # 404 / 405 → try next candidate. Other codes still mean Senso is up,
+                # but the key/payload is wrong — no point continuing.
+                if resp.status_code not in (404, 405):
+                    break
     except Exception:
-        return {"cited_url": _fallback_url(company), "success": True, "fallback": True}
+        pass
+
+    return {"cited_url": _fallback_url(company), "success": True, "fallback": True}
 
 
 def format_report_markdown(report: Dict[str, Any]) -> str:

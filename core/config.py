@@ -21,9 +21,8 @@ CLICKHOUSE_USER = os.getenv("CLICKHOUSE_USER", "default")
 CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "")
 CLICKHOUSE_DATABASE = os.getenv("CLICKHOUSE_DATABASE", "dealagent")
 
-# Senso
+# Senso — base + endpoints are owned by core/senso_client.py
 SENSO_API_KEY = os.getenv("SENSO_API_KEY", "")
-SENSO_URL = "https://api.senso.ai/v1/citeables"
 
 # x402 / CDP
 CDP_API_KEY_NAME = os.getenv("CDP_API_KEY_NAME", "")
