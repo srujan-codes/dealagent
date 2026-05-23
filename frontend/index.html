@@ -451,7 +451,7 @@
     <div class="trace" id="r-trace">
       <div class="head">
         <div class="h">Agent Trace — wall-clock timing</div>
-        <div class="dd-tag" id="r-dd-tag">Datadog · local</div>
+        <a class="dd-tag" id="r-dd-tag" href="#" target="_blank" rel="noopener" style="text-decoration:none;">Datadog · local</a>
       </div>
       <div class="total" id="r-total">—</div>
       <div class="bars" id="r-bars"></div>
@@ -591,12 +591,17 @@
       : `${total.toFixed(0)}ms total`;
 
     const ddTag = document.getElementById("r-dd-tag");
-    if (r.datadog_enabled) {
-      ddTag.textContent = "Datadog · live spans";
+    if (r.datadog_enabled && r.datadog_url) {
+      ddTag.textContent = "Datadog · LLM Obs ↗";
+      ddTag.href = r.datadog_url;
+      ddTag.title = "Open this trace in Datadog LLM Observability";
       ddTag.classList.add("live");
     } else {
-      ddTag.textContent = "Datadog · local";
+      ddTag.textContent = "Datadog · local only";
+      ddTag.href = "#";
+      ddTag.removeAttribute("title");
       ddTag.classList.remove("live");
+      ddTag.onclick = (e) => e.preventDefault();
     }
 
     const stages = ["research", "scoring", "benchmark", "publish", "payment"];

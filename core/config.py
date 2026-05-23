@@ -53,3 +53,12 @@ def have_clickhouse() -> bool:
 
 def have_senso() -> bool:
     return bool(SENSO_API_KEY)
+
+
+def have_datadog() -> bool:
+    return bool(DD_API_KEY)
+
+
+def datadog_llmobs_url() -> str:
+    """Convenience link to the LLM Observability dashboard for this app."""
+    return f"https://app.{DD_SITE}/llm/traces?query=%40ml_app%3A{DD_SERVICE}"
