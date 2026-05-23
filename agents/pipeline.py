@@ -35,11 +35,18 @@ try:
     LLMObs = _LLMObs
     if config.have_datadog():
         try:
+            # integrations_enabled=False skips ddtrace's auto-patching of
+            # openai/anthropic/etc. We intentionally do all instrumentation
+            # manually via workflow/task/llm decorators below. This also
+            # avoids a name collision: ddtrace's openai-agents auto-patch
+            # tries to import from `agents.tracing`, which clashes with our
+            # own top-level `agents/` package.
             LLMObs.enable(
                 ml_app=config.DD_SERVICE,
                 api_key=config.DD_API_KEY,
                 site=config.DD_SITE,
                 agentless_enabled=True,
+                integrations_enabled=False,
             )
             _LLMOBS_ENABLED = True
         except Exception:
