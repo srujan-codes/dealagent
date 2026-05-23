@@ -143,27 +143,30 @@ def _strip_json_fence(text: str) -> str:
 
 
 async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) -> Dict[str, Any]:
-    await _emit(cb, "scoring", "Scoring Agent firing — Claude analyzing signals with citations...")
+    await _emit(cb, "scoring", f"Scoring Agent firing — Groq ({config.GROQ_MODEL}) analyzing signals...")
     with _span("dealagent.scoring") as span:
         span.set_tag("company", company)
+        span.set_tag("model", config.GROQ_MODEL)
 
-        if not config.have_anthropic():
-            await _emit(cb, "scoring", "Scoring Agent complete — fallback scores (no Anthropic key).")
+        if not config.have_groq():
+            await _emit(cb, "scoring", "Scoring Agent complete — fallback scores (no Groq key).")
             return _fallback_scores()
 
         try:
-            from anthropic import AsyncAnthropic
-            client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+            from groq import AsyncGroq
+            client = AsyncGroq(api_key=config.GROQ_API_KEY)
             prompt = SCORING_PROMPT.format(
                 company=company,
                 research=_research_for_prompt(research),
             )
-            msg = await client.messages.create(
-                model=config.CLAUDE_MODEL,
+            completion = await client.chat.completions.create(
+                model=config.GROQ_MODEL,
                 max_tokens=1500,
+                temperature=0.3,
+                response_format={"type": "json_object"},
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = msg.content[0].text if msg.content else ""
+            text = completion.choices[0].message.content or ""
             text = _strip_json_fence(text)
             parsed = json.loads(text)
             # sanity
@@ -177,7 +180,7 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
             return parsed
         except Exception as e:
             span.set_tag("error", str(e)[:200])
-            await _emit(cb, "scoring", f"Scoring Agent complete — fallback scores ({type(e).__name__}).")
+            await _emit(cb, "scoring", f"Scoring Agent complete — fallback scores ({type(e).__name__}: {str(e)[:80]}).")
             return _fallback_scores()
 
 

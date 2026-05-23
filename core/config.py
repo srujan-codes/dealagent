@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
-# Anthropic
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+# Groq — fast open-source LLM inference (Llama 3.3 70B on LPU hardware)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # Nimble
 NIMBLE_API_KEY = os.getenv("NIMBLE_API_KEY", "")
@@ -39,8 +39,8 @@ DD_ENV = os.getenv("DD_ENV", "hackathon")
 HTTP_TIMEOUT = 30.0
 
 
-def have_anthropic() -> bool:
-    return bool(ANTHROPIC_API_KEY)
+def have_groq() -> bool:
+    return bool(GROQ_API_KEY)
 
 
 def have_nimble() -> bool:
