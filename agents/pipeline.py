@@ -10,8 +10,9 @@ Agents:
 import asyncio
 import json
 import re
+import time
 import uuid
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Coroutine, Dict, Optional
 
 from core import config
 from core import nimble_client
@@ -55,6 +56,15 @@ def _span(name: str):
             pass
 
     return _Noop()
+
+
+async def _timed(name: str, coro: Coroutine, sink: Dict[str, float]) -> Any:
+    """Run coro, record wall-clock duration (ms) into sink[name]."""
+    t0 = time.perf_counter()
+    try:
+        return await coro
+    finally:
+        sink[name] = round((time.perf_counter() - t0) * 1000, 1)
 
 
 # -----------------------------------------------------------------------------
@@ -241,6 +251,8 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
     """End-to-end DealAgent run. Never raises — always returns a report dict."""
     company_name = (company_name or "").strip() or "Unknown"
     report_id = uuid.uuid4().hex[:16]
+    timing: Dict[str, float] = {}
+    t_total_start = time.perf_counter()
 
     with _span("dealagent.pipeline") as span:
         span.set_tag("company", company_name)
@@ -249,15 +261,27 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         await _emit(progress_callback, "start", f"DealAgent kicking off due diligence on {company_name}...")
 
         # 1. Research
-        research = await research_agent(company_name, progress_callback)
+        research = await _timed(
+            "research",
+            research_agent(company_name, progress_callback),
+            timing,
+        )
 
         # 2. Scoring
-        scoring = await scoring_agent(company_name, research, progress_callback)
+        scoring = await _timed(
+            "scoring",
+            scoring_agent(company_name, research, progress_callback),
+            timing,
+        )
         scores = scoring.get("scores", {})
         overall_score = _overall(scores)
 
         # 3. Benchmark
-        benchmark = await benchmark_agent(overall_score, progress_callback)
+        benchmark = await _timed(
+            "benchmark",
+            benchmark_agent(overall_score, progress_callback),
+            timing,
+        )
 
         # Build the report so far (publisher needs it)
         report: Dict[str, Any] = {
@@ -272,7 +296,11 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         }
 
         # 4. Publish
-        pub = await publisher_agent(report, progress_callback)
+        pub = await _timed(
+            "publish",
+            publisher_agent(report, progress_callback),
+            timing,
+        )
         report["cited_url"] = pub.get("cited_url", "")
         report["publish_fallback"] = pub.get("fallback", False)
 
@@ -280,15 +308,24 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         await asyncio.to_thread(clickhouse_client.insert_report, report)
 
         # 5. Payment
-        payment = await payment_agent(report_id, progress_callback)
+        payment = await _timed(
+            "payment",
+            payment_agent(report_id, progress_callback),
+            timing,
+        )
         report["payment"] = payment
 
         # Sources count for the UI
         sources_count = sum(len(v) for v in research.values())
         report["sources_count"] = sources_count
 
+        timing["total"] = round((time.perf_counter() - t_total_start) * 1000, 1)
+        report["timing_ms"] = timing
+        report["datadog_enabled"] = _DD_OK and bool(config.DD_API_KEY)
+
         span.set_tag("overall_score", overall_score)
         span.set_tag("sources_count", sources_count)
+        span.set_tag("total_ms", timing["total"])
 
-    await _emit(progress_callback, "complete", "DealAgent complete — all 5 agents fired.")
+    await _emit(progress_callback, "complete", f"DealAgent complete — all 5 agents fired in {timing['total']/1000:.1f}s.")
     return report

@@ -283,6 +283,60 @@
   .panel .row .k { color: var(--muted); }
   .panel .row .v { color: var(--text); word-break: break-all; }
 
+  /* Trace panel */
+  .trace {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 12px;
+  }
+  .trace .head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px;
+  }
+  .trace .head .h {
+    font-size: 10px; letter-spacing: 2px;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .trace .head .dd-tag {
+    font-size: 10px; letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .trace .head .dd-tag.live {
+    color: var(--teal); border-color: var(--teal);
+  }
+  .trace .total {
+    font-family: 'Syne', sans-serif;
+    font-size: 30px; font-weight: 800;
+    color: var(--teal);
+    line-height: 1;
+    margin-bottom: 14px;
+  }
+  .trace .bars { display: flex; flex-direction: column; gap: 6px; }
+  .trace .bar-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 64px;
+    gap: 10px;
+    align-items: center;
+    font-size: 11px;
+  }
+  .trace .bar-name { color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .trace .bar-track {
+    height: 8px; background: rgba(124,109,250,0.08);
+    border-radius: 999px; overflow: hidden;
+  }
+  .trace .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--purple), var(--teal));
+    border-radius: 999px;
+    transition: width 0.4s ease;
+  }
+  .trace .bar-val { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+
   /* Sponsor pills */
   .sponsors {
     display: flex; flex-wrap: wrap; gap: 8px;
@@ -392,6 +446,15 @@
         <div class="row"><span class="k">Sources</span><span class="v" id="r-sources">—</span></div>
         <div class="row"><span class="k">Benchmark</span><span class="v" id="r-bench">—</span></div>
       </div>
+    </div>
+
+    <div class="trace" id="r-trace">
+      <div class="head">
+        <div class="h">Agent Trace — wall-clock timing</div>
+        <div class="dd-tag" id="r-dd-tag">Datadog · local</div>
+      </div>
+      <div class="total" id="r-total">—</div>
+      <div class="bars" id="r-bars"></div>
     </div>
   </div>
 
@@ -515,7 +578,44 @@
     }
     document.getElementById("r-bench").textContent = benchTxt;
 
+    renderTrace(r);
+
     report.classList.add("show");
+  }
+
+  function renderTrace(r) {
+    const t = r.timing_ms || {};
+    const total = Number(t.total ?? 0);
+    document.getElementById("r-total").textContent = total >= 1000
+      ? `${(total / 1000).toFixed(2)}s total`
+      : `${total.toFixed(0)}ms total`;
+
+    const ddTag = document.getElementById("r-dd-tag");
+    if (r.datadog_enabled) {
+      ddTag.textContent = "Datadog · live spans";
+      ddTag.classList.add("live");
+    } else {
+      ddTag.textContent = "Datadog · local";
+      ddTag.classList.remove("live");
+    }
+
+    const stages = ["research", "scoring", "benchmark", "publish", "payment"];
+    const max = Math.max(1, ...stages.map(s => Number(t[s] || 0)));
+    const bars = document.getElementById("r-bars");
+    bars.innerHTML = "";
+    stages.forEach(s => {
+      const v = Number(t[s] || 0);
+      const pct = Math.max(2, (v / max) * 100);
+      const label = v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${v.toFixed(0)}ms`;
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      row.innerHTML = `
+        <div class="bar-name">${s}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="bar-val">${label}</div>
+      `;
+      bars.appendChild(row);
+    });
   }
 
   function escapeHtml(s) {
