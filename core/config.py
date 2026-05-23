@@ -27,6 +27,7 @@ SENSO_API_KEY = os.getenv("SENSO_API_KEY", "")
 # x402 / CDP
 CDP_API_KEY_NAME = os.getenv("CDP_API_KEY_NAME", "")
 CDP_API_KEY_PRIVATE_KEY = os.getenv("CDP_API_KEY_PRIVATE_KEY", "")
+CDP_WALLET_SECRET = os.getenv("CDP_WALLET_SECRET", "")
 AGENT_WALLET_ADDRESS = os.getenv("AGENT_WALLET_ADDRESS", "0xAutonomousResearchAgent")
 
 # Datadog

@@ -443,7 +443,7 @@
         <div class="h">Published Report</div>
         <div class="body"><a id="r-cited" href="#" target="_blank" rel="noopener">—</a></div>
         <div class="row"><span class="k">Senso prompt</span><span class="v" id="r-senso">—</span></div>
-        <div class="row"><span class="k">Tx hash</span><span class="v" id="r-tx">—</span></div>
+        <div class="row"><span class="k">Tx hash</span><span class="v" id="r-tx-wrap"><span id="r-tx">—</span></span></div>
         <div class="row"><span class="k">Sources</span><span class="v" id="r-sources">—</span></div>
         <div class="row"><span class="k">Benchmark</span><span class="v" id="r-bench">—</span></div>
       </div>
@@ -557,16 +557,37 @@
     });
 
     const citedA = document.getElementById("r-cited");
-    if (r.cited_url) {
+    if (r.cited_url && !r.publish_fallback) {
+      // Real published URL — clickable
       citedA.textContent = r.cited_url;
       citedA.href = r.cited_url;
+      citedA.style.color = "var(--purple)";
+      citedA.removeAttribute("title");
+    } else if (r.senso_prompt_id) {
+      // Senso prompt was created but publish blocked (no destination selected)
+      citedA.textContent = "Senso · pending destination selection";
+      citedA.href = "https://app.senso.ai/destinations";
+      citedA.style.color = "var(--muted)";
+      citedA.title = r.senso_publish_message || "Toggle a destination ON in Senso to publish";
     } else {
       citedA.textContent = "—";
       citedA.removeAttribute("href");
     }
 
     const tx = r.payment && r.payment.tx_hash;
-    document.getElementById("r-tx").textContent = tx ? (tx.slice(0, 18) + "…") : "—";
+    const explorer = r.payment && r.payment.explorer_url;
+    const onchain = !!(r.payment && r.payment.onchain);
+    const txWrap = document.getElementById("r-tx-wrap");
+    if (tx) {
+      const short = tx.slice(0, 18) + "…";
+      if (explorer && onchain) {
+        txWrap.innerHTML = `<a id="r-tx" href="${explorer}" target="_blank" rel="noopener" title="View on Basescan Sepolia" style="color:var(--teal); text-decoration:underline;">${short} ↗</a>`;
+      } else {
+        txWrap.innerHTML = `<span id="r-tx" title="${onchain ? '' : 'simulated tx — set CDP keys to send real on-chain'}">${short}</span>`;
+      }
+    } else {
+      txWrap.innerHTML = `<span id="r-tx">—</span>`;
+    }
     document.getElementById("r-sources").textContent = r.sources_count ?? "—";
 
     const sensoEl = document.getElementById("r-senso");
