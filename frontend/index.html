@@ -756,23 +756,31 @@
     const raw = Number(r.overall_raw_score ?? r.overall_score ?? 0);
     const truth = Number(r.overall_truth_score ?? r.overall_score ?? 0);
     const delta = raw - truth;
+    const prShine = r.pr_shine || {};
+    const prScore = Number(prShine.pr_shine_score ?? 0);
+    const prLevel = prShine.level || "low";
+    const prSnippets = prShine.snippets_analyzed || 0;
+    const prSim = Number(prShine.avg_pairwise_bigram_similarity ?? 0);
 
     document.getElementById("r-raw-score").textContent = raw.toFixed(1);
     document.getElementById("r-truth-score").textContent = truth.toFixed(1);
 
     const deltaEl = document.getElementById("r-delta");
+    const parts = [];
     if (Math.abs(delta) < 0.1) {
-      deltaEl.innerHTML = `<strong>Δ 0.0</strong> · fully triangulated, raw and truth align.`;
+      parts.push(`<strong>Δ 0.0</strong> · raw and truth align`);
     } else {
-      deltaEl.innerHTML = `<strong>Δ ${delta >= 0 ? "−" : "+"}${Math.abs(delta).toFixed(1)}</strong> · adjusted for source-tier weighting.`;
+      parts.push(`<strong>Δ ${delta >= 0 ? "−" : "+"}${Math.abs(delta).toFixed(1)}</strong> · adjusted for source tiers`);
     }
+    if (prSnippets >= 3) {
+      parts.push(`PR-shine score <strong>${prScore.toFixed(2)}</strong> (${prSnippets} snippets, jaccard ${prSim.toFixed(3)})`);
+    }
+    deltaEl.innerHTML = parts.join(" · ");
 
     const badge = document.getElementById("r-pr-badge");
-    let level = "low", label = "PR shine: low";
-    if (Math.abs(delta) >= 1.5) { level = "high"; label = "PR shine: HIGH"; }
-    else if (Math.abs(delta) >= 0.7) { level = "medium"; label = "PR shine: medium"; }
-    badge.className = "pr-badge " + level;
-    badge.textContent = label;
+    // Use the real pr_shine.level from the backend (it weighs tier + phrasing similarity)
+    badge.className = "pr-badge " + prLevel;
+    badge.textContent = "PR shine: " + (prLevel === "insufficient_data" ? "n/a" : prLevel.toUpperCase());
 
     const dist = r.tier_distribution || {};
     const tiersEl = document.getElementById("r-tiers");

@@ -19,7 +19,11 @@ from core import nimble_client
 from core import clickhouse_client
 from core import senso_client
 from core import x402_client
-from core import credibility  # v2: source tiering + triangulation
+from core import credibility       # v2: source tiering + triangulation
+from core import github_client     # v2: T1 engineering signals
+from core import sec_edgar_client  # v2: T1 regulatory signals
+from core import courtlistener_client  # v2: T1 legal-risk signals
+from core import pr_detection      # v2: coordinated-PR detection
 
 # ---------------------------------------------------------------------------
 # Datadog LLM Observability
@@ -128,19 +132,64 @@ async def _timed(name: str, coro: Coroutine, sink: Dict[str, float]) -> Any:
 # Agent 1 — Research
 # -----------------------------------------------------------------------------
 async def research_agent(company: str, cb: ProgressCb) -> Dict[str, Any]:
-    await _emit(cb, "research", f"Research Agent firing — 4 parallel Nimble searches on {company}...")
+    """v2: Nimble + GitHub + SEC + CourtListener in parallel.
+
+    Nimble provides T2-T5 web breadth. GitHub/SEC/CourtListener provide
+    T1 first-party signals that PR firms cannot fake. All four data sources
+    fire concurrently; T1 results get merged into the appropriate Nimble
+    category so the scoring agent sees one unified research dict.
+    """
+    await _emit(cb, "research", f"Research Agent firing — Nimble + GitHub + SEC + CourtListener in parallel on {company}...")
     with _task("dealagent.research"):
-        signals = await nimble_client.parallel_search(company)
-        # v2: annotate every signal with credibility tier (T1-T5)
+        # Fire all 4 source agents concurrently
+        nimble_task = nimble_client.parallel_search(company)
+        github_task = github_client.engineering_signals(company)
+        sec_task = sec_edgar_client.regulatory_signals(company)
+        court_task = courtlistener_client.legal_signals(company)
+        nimble_res, gh_res, sec_res, court_res = await asyncio.gather(
+            nimble_task, github_task, sec_task, court_task,
+            return_exceptions=True,
+        )
+
+        signals = nimble_res if isinstance(nimble_res, dict) else {
+            "founder_signals": [], "traction_signals": [],
+            "market_signals": [], "risk_signals": [],
+        }
+
+        # v2: annotate every Nimble signal with credibility tier (T1-T5)
         signals = credibility.annotate_research(signals)
+
+        # Merge T1 signals into the appropriate Nimble categories
+        # GitHub → team + traction (engineering velocity tells both stories)
+        if isinstance(gh_res, list) and gh_res:
+            signals.setdefault("founder_signals", []).extend(gh_res[:2])
+            signals.setdefault("traction_signals", []).extend(gh_res[2:])
+        # SEC EDGAR → traction (filing health) + risk (8-K disclosures)
+        if isinstance(sec_res, list) and sec_res:
+            signals.setdefault("traction_signals", []).extend(sec_res[:3])
+            signals.setdefault("risk_signals", []).extend(sec_res[3:6])
+        # CourtListener → all risk
+        if isinstance(court_res, list) and court_res:
+            signals.setdefault("risk_signals", []).extend(court_res[:5])
+
+        # Tally
         total = sum(len(v) for v in signals.values())
         tier_dist = credibility.tier_distribution(signals)
+        gh_count = len(gh_res) if isinstance(gh_res, list) else 0
+        sec_count = len(sec_res) if isinstance(sec_res, list) else 0
+        court_count = len(court_res) if isinstance(court_res, list) else 0
         _annotate(
             input_data=f"company={company}",
-            output_data=f"{total} signals across 4 dimensions; tier distribution: {tier_dist}",
-            tags={"company": company, "agent": "research", "tool": "nimble"},
+            output_data=(
+                f"{total} signals · Nimble={sum(len(v) for v in (nimble_res.values() if isinstance(nimble_res, dict) else []))}, "
+                f"GitHub={gh_count}, SEC={sec_count}, Court={court_count} · tiers: {tier_dist}"
+            ),
+            tags={"company": company, "agent": "research", "tools": "nimble+github+sec+courtlistener"},
         )
-    await _emit(cb, "research", f"Research Agent complete — pulled {total} signals (tiers: {tier_dist}).")
+    await _emit(
+        cb, "research",
+        f"Research Agent complete — {total} signals (Nimble + {gh_count} GitHub + {sec_count} SEC + {court_count} Court) · tiers: {tier_dist}",
+    )
     return signals
 
 
@@ -214,13 +263,17 @@ def _research_for_prompt(research: Dict[str, Any], cap: int = 6) -> str:
 def _enrich_scores_with_triangulation(
     scores: Dict[str, Any],
     research: Dict[str, List[Dict]],
+    pr_shine: float = 0.0,
 ) -> Dict[str, Any]:
-    """Compute per-dimension truth_score = raw * truth_discount(triangulation).
+    """Compute per-dimension truth_score from raw_score, triangulation, and PR shine.
+
+    truth = 5 + (raw - 5) * final_discount
+    final_discount = base_discount * (1 - pr_shine * 0.4)
+    base_discount = truth_discount(triangulation) ∈ [0.4, 1.0]
 
     Mutates and returns the scores dict, adding fields:
       raw_score, truth_score, triangulation, tier_weight (per dimension)
     """
-    # Map dimension key → research category key
     dim_to_cat = {
         "team":     "founder_signals",
         "market":   "market_signals",
@@ -231,13 +284,13 @@ def _enrich_scores_with_triangulation(
         s = scores.get(dim, {})
         raw = float(s.get("score", 0) or 0)
         triang = credibility.triangulation_score(research.get(cat, []))
-        discount = credibility.truth_discount(triang)
-        # Pull toward neutral 5 when triangulation is weak: truth = 5 + (raw - 5) * discount
-        truth = round(5 + (raw - 5) * discount, 2)
+        base_discount = credibility.truth_discount(triang)
+        final_discount = pr_detection.apply_pr_shine_to_truth_discount(base_discount, pr_shine)
+        truth = round(5 + (raw - 5) * final_discount, 2)
         s["raw_score"] = raw
         s["truth_score"] = truth
         s["triangulation"] = triang
-        s["tier_weight"] = discount
+        s["tier_weight"] = final_discount
         scores[dim] = s
     return scores
 
@@ -288,9 +341,13 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
                 if "source_tier" not in scores[dim]:
                     src = scores[dim].get("source", "")
                     scores[dim]["source_tier"] = credibility.classify_source(src)
-            # v2: enrich with triangulation-discounted truth_score
-            scores = _enrich_scores_with_triangulation(scores, research)
+            # v2: detect coordinated PR shine, then enrich with triangulation + PR discount
+            pr_signal = pr_detection.detect_pr_shine(research)
+            scores = _enrich_scores_with_triangulation(
+                scores, research, pr_shine=pr_signal["pr_shine_score"],
+            )
             parsed["scores"] = scores
+            parsed["pr_shine"] = pr_signal
 
             # Annotate the LLM span with the full prompt+completion for Datadog
             usage = getattr(completion, "usage", None)
@@ -323,7 +380,11 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
             await _emit(cb, "scoring", f"Scoring Agent complete — fallback scores ({type(e).__name__}: {str(e)[:80]}).")
             # Enrich even fallback scores with triangulation so the UI doesn't break
             fb = _fallback_scores()
-            fb["scores"] = _enrich_scores_with_triangulation(fb["scores"], research)
+            pr_signal = pr_detection.detect_pr_shine(research)
+            fb["scores"] = _enrich_scores_with_triangulation(
+                fb["scores"], research, pr_shine=pr_signal["pr_shine_score"],
+            )
+            fb["pr_shine"] = pr_signal
             return fb
 
 
@@ -474,6 +535,7 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             "triangulation_per_dimension": triangulation_per_dim,
             "avg_triangulation": avg_triangulation,
             "tier_distribution": tier_dist,
+            "pr_shine": scoring.get("pr_shine", {}),   # v2 phase 5
             "verdict": scoring.get("verdict", ""),
             "key_insight": scoring.get("key_insight", ""),
             "benchmark": benchmark,
