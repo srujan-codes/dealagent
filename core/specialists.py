@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional  # noqa
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```\s*$", re.MULTILINE)
@@ -264,8 +264,14 @@ async def run_synthesizer(
     specialist_results: Dict[str, Dict[str, Any]],
     llm_span_factory: Callable,
     annotate: Callable,
+    stream_cb: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
-    """Combine 4 specialist outputs into final scoring + recommendation."""
+    """Combine 4 specialist outputs into final scoring + recommendation.
+
+    v3-6: If stream_cb is provided, streams tokens via Groq's streaming API
+    and calls the callback with each delta. The full output is still parsed
+    as JSON at the end. The callback is responsible for SSE-formatting.
+    """
     prompt = SYNTHESIZER_PROMPT.format(
         company=company,
         financial_json=json.dumps(specialist_results.get("financial", {}), indent=2),
@@ -275,28 +281,36 @@ async def run_synthesizer(
     )
     try:
         with llm_span_factory("dealagent.synthesizer", model_name=model, model_provider="groq"):
-            completion = await client.chat.completions.create(
-                model=model,
-                max_tokens=1500,
-                temperature=0.25,
-                response_format={"type": "json_object"},
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = completion.choices[0].message.content or "{}"
+            if stream_cb:
+                # v3-6 streaming path
+                stream = await client.chat.completions.create(
+                    model=model, max_tokens=1500, temperature=0.25,
+                    response_format={"type": "json_object"},
+                    messages=[{"role": "user", "content": prompt}],
+                    stream=True,
+                )
+                buffer = ""
+                async for chunk in stream:
+                    delta = (chunk.choices[0].delta.content if chunk.choices else "") or ""
+                    if delta:
+                        buffer += delta
+                        try:
+                            await stream_cb(delta)
+                        except Exception:
+                            pass
+                text = buffer
+            else:
+                completion = await client.chat.completions.create(
+                    model=model, max_tokens=1500, temperature=0.25,
+                    response_format={"type": "json_object"},
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = completion.choices[0].message.content or "{}"
             parsed = json.loads(_strip_fence(text))
-            usage = getattr(completion, "usage", None)
-            metrics = {}
-            if usage is not None:
-                metrics = {
-                    "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                    "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
-                    "total_tokens": getattr(usage, "total_tokens", 0) or 0,
-                }
             annotate(
                 input_data=[{"role": "user", "content": prompt}],
                 output_data=[{"role": "assistant", "content": text}],
-                metrics=metrics,
-                tags={"company": company, "agent": "synthesizer"},
+                tags={"company": company, "agent": "synthesizer", "streamed": bool(stream_cb)},
             )
             return parsed
     except Exception as e:
@@ -318,6 +332,7 @@ async def run_committee(
     research: Dict[str, List[Dict]],
     llm_span_factory: Callable,
     annotate: Callable,
+    synth_stream_cb: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     """Run all 4 specialists in parallel, then synthesizer. Returns final scoring dict.
 
@@ -340,9 +355,10 @@ async def run_committee(
         SPECIALISTS[i]["key"]: results[i] for i in range(len(SPECIALISTS))
     }
 
-    # Run synthesizer
+    # Run synthesizer (optionally streaming)
     synth = await run_synthesizer(
         client, model, company, specialist_outputs, llm_span_factory, annotate,
+        stream_cb=synth_stream_cb,
     )
 
     # Fall back to manual merge if synthesizer failed

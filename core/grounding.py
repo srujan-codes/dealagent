@@ -93,7 +93,11 @@ def ground_scores(
 
         # Also ground risk sub-scores if present
         breakdown = (s.get("breakdown") or {}) if dim == "risk" else {}
-        for sub_key, sub in breakdown.items():
+        for sub_key, sub in list(breakdown.items()):
+            if not isinstance(sub, dict):
+                # Synthesizer may have returned a bare number; coerce
+                breakdown[sub_key] = {"score": sub if isinstance(sub, (int, float)) else 5, "reasoning": ""}
+                sub = breakdown[sub_key]
             sub_reasoning = sub.get("reasoning", "")
             best_sig = _best_signal_for_reasoning(research, sub_reasoning)
             if best_sig:

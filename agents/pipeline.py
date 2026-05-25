@@ -30,6 +30,7 @@ from core import specialists       # v3-1: multi-agent decomposition
 from core import critic            # v3-2: self-critique / evidence-quality review
 from core import grounding         # v3-3: claim grounding / provenance
 from core import trajectory        # v3-4: temporal momentum per dimension
+from core import memory            # v3-5: semantic memory of past reports
 
 # ---------------------------------------------------------------------------
 # Datadog LLM Observability
@@ -375,7 +376,11 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
             from groq import AsyncGroq
             client = AsyncGroq(api_key=config.GROQ_API_KEY)
 
-            # v3-1: Multi-agent committee — 4 specialists in parallel + synthesizer
+            # v3-6 streaming: pipe synthesizer tokens to the progress callback
+            async def _stream_chunk(delta: str) -> None:
+                await _emit(cb, "reasoning_chunk", delta)
+
+            # v3-1: Multi-agent committee — 4 specialists in parallel + streaming synthesizer
             parsed = await specialists.run_committee(
                 client=client,
                 model=config.GROQ_MODEL,
@@ -383,16 +388,27 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
                 research=research,
                 llm_span_factory=_llm,
                 annotate=_annotate,
+                synth_stream_cb=_stream_chunk if cb else None,
             )
 
-            # Sanity + tier annotation
-            scores = parsed.get("scores", {})
+            # Sanity + tier annotation + defensive coercion
+            scores = parsed.get("scores", {}) or {}
             for dim in ("team", "market", "traction", "risk"):
-                if dim not in scores:
+                if dim not in scores or not isinstance(scores[dim], dict):
                     scores[dim] = {"score": 5, "reasoning": "Missing.", "source": "", "source_tier": 4}
                 if "source_tier" not in scores[dim]:
                     src = scores[dim].get("source", "")
                     scores[dim]["source_tier"] = credibility.classify_source(src)
+                # Coerce risk.breakdown sub-scores that came back as bare numbers
+                if dim == "risk":
+                    bd = scores[dim].get("breakdown") or {}
+                    for k, v in list(bd.items()):
+                        if not isinstance(v, dict):
+                            bd[k] = {
+                                "score": v if isinstance(v, (int, float)) else 5,
+                                "reasoning": "",
+                            }
+                    scores[dim]["breakdown"] = bd
 
             # v2: detect PR shine, then enrich with triangulation + PR discount
             pr_signal = pr_detection.detect_pr_shine(research)
@@ -423,6 +439,57 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
             )
             fb["pr_shine"] = pr_signal
             return fb
+
+
+COMPARABLES_PROMPT = """You are a VC analyst. Suggest 2 OTHER companies that are
+the most structurally similar to {company} — same vertical, similar
+stage, comparable business model.
+
+Research signals (lightweight context):
+{research_brief}
+
+Return ONLY valid JSON:
+{{
+  "peers": [
+    {{"name": "<company name>", "why_similar": "<one sentence>"}},
+    {{"name": "<company name>", "why_similar": "<one sentence>"}}
+  ]
+}}
+"""
+
+
+async def comparables_agent(
+    company: str, research: Dict[str, List[Dict]], cb: ProgressCb
+) -> Dict[str, Any]:
+    """v3-7 (reduced) — Llama suggests 2 peer companies + why-similar."""
+    if not config.have_groq():
+        return {"peers": []}
+    try:
+        from groq import AsyncGroq
+        client = AsyncGroq(api_key=config.GROQ_API_KEY)
+        with _llm("dealagent.comparables", model_name=config.GROQ_MODEL, model_provider="groq"):
+            completion = await client.chat.completions.create(
+                model=config.GROQ_MODEL,
+                max_tokens=300,
+                temperature=0.4,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": COMPARABLES_PROMPT.format(
+                    company=company,
+                    research_brief=_research_for_prompt(research, cap=2)[:1500],
+                )}],
+            )
+            text = completion.choices[0].message.content or "{}"
+            try:
+                parsed = json.loads(_strip_json_fence(text))
+            except Exception:
+                parsed = {"peers": []}
+            _annotate(
+                output_data=str(parsed.get("peers", []))[:200],
+                tags={"company": company, "agent": "comparables"},
+            )
+            return parsed
+    except Exception as e:
+        return {"peers": [], "error": f"{type(e).__name__}: {str(e)[:120]}"}
 
 
 ADVERSARIAL_PROMPT = """You are a skeptical contrarian VC analyst. Your job is to STEELMAN the case AGAINST investing in {company}.
@@ -683,6 +750,13 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             timing,
         )
 
+        # v3-7 (reduced): Llama-suggested peer companies
+        comparables = await _timed(
+            "comparables",
+            comparables_agent(company_name, research, progress_callback),
+            timing,
+        )
+
         overall_raw = _overall(scores, use_truth=False)
         overall_truth = _overall(scores, use_truth=True)
         # Use truth score for benchmarking (it's the more honest number)
@@ -708,6 +782,14 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         time_burst = pr_detection.detect_time_burst(research)
         # v3-4: per-dimension temporal trajectory
         trajectory_per_dim = trajectory.analyze(research)
+        # v3-5: semantic memory — find similar past deals
+        similar_past = await asyncio.to_thread(
+            memory.find_similar_past_reports,
+            company_name,
+            scoring.get("verdict", ""),
+            scoring.get("key_insight", ""),
+            3,
+        )
 
         # Build the report so far (publisher needs it)
         report: Dict[str, Any] = {
@@ -737,6 +819,8 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             "specialist_outputs": scoring.get("_specialist_outputs", {}),  # v3-1
             "trajectory": trajectory_per_dim,        # v3-4
             "provenance_summary": scoring.get("provenance_summary", {}),  # v3-3
+            "similar_past_reports": similar_past,    # v3-5
+            "comparables": comparables,              # v3-7
         }
 
         # 4. Publish
