@@ -283,6 +283,101 @@
   .panel .row .k { color: var(--muted); }
   .panel .row .v { color: var(--text); word-break: break-all; }
 
+  /* v2: Truth-Score panel */
+  .truth {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-top: 12px;
+  }
+  .truth .head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px;
+  }
+  .truth .head .h {
+    font-size: 10px; letter-spacing: 2px;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .truth .pr-badge {
+    font-size: 10px; letter-spacing: 1.5px;
+    text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--muted);
+  }
+  .truth .pr-badge.high   { color: var(--red);    border-color: var(--red); }
+  .truth .pr-badge.medium { color: var(--orange); border-color: var(--orange); }
+  .truth .pr-badge.low    { color: var(--green);  border-color: var(--green); }
+  .truth .scores-pair {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    margin-bottom: 16px;
+  }
+  .truth .score-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+  }
+  .truth .score-block .lbl {
+    font-size: 9px; letter-spacing: 1.5px; color: var(--muted);
+    text-transform: uppercase;
+  }
+  .truth .score-block .val {
+    font-family: 'Syne', sans-serif;
+    font-size: 38px; font-weight: 800;
+    line-height: 1; margin: 6px 0;
+  }
+  .truth .score-block.raw .val   { color: var(--muted); }
+  .truth .score-block.truth .val { color: var(--teal); }
+  .truth .delta {
+    text-align: center; font-size: 12px; color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .truth .delta strong { color: var(--text); }
+  .truth .tiers {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+  .truth .tier-cell {
+    text-align: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 4px;
+  }
+  .truth .tier-cell .t-name {
+    font-size: 9px; letter-spacing: 1px;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .truth .tier-cell .t-count {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px; font-weight: 700; color: var(--text);
+    line-height: 1.2;
+  }
+  .truth .tier-cell.has-signal .t-count { color: var(--purple); }
+  .truth .tier-help {
+    font-size: 10px; color: var(--muted);
+    line-height: 1.5; margin-top: 10px;
+    text-align: center;
+  }
+
+  /* per-score: tier badge on each score card */
+  .score .tier-badge {
+    display: inline-block; font-size: 9px; letter-spacing: 1px;
+    padding: 2px 6px; border-radius: 4px;
+    color: var(--muted); border: 1px solid var(--border);
+    margin-top: 6px; text-transform: uppercase;
+  }
+  .score .tier-badge.t1 { color: var(--green);  border-color: var(--green);  }
+  .score .tier-badge.t2 { color: var(--teal);   border-color: var(--teal);   }
+  .score .tier-badge.t3 { color: var(--purple); border-color: var(--purple); }
+  .score .tier-badge.t4 { color: var(--orange); border-color: var(--orange); }
+  .score .tier-badge.t5 { color: var(--red);    border-color: var(--red);    }
+  .score .raw-vs-truth {
+    font-size: 10px; color: var(--muted);
+    margin-top: 4px;
+  }
+
   /* Trace panel */
   .trace {
     background: var(--surface-2);
@@ -433,6 +528,29 @@
       <div class="verdict" id="r-verdict">—</div>
     </div>
     <div class="scores" id="r-scores"></div>
+
+    <div class="truth" id="r-truth">
+      <div class="head">
+        <div class="h">Truth-adjusted score · v2</div>
+        <div class="pr-badge" id="r-pr-badge">PR shine: —</div>
+      </div>
+      <div class="scores-pair">
+        <div class="score-block raw">
+          <div class="lbl">Raw (what the web says)</div>
+          <div class="val" id="r-raw-score">—</div>
+        </div>
+        <div class="score-block truth">
+          <div class="lbl">Truth (after tier weighting)</div>
+          <div class="val" id="r-truth-score">—</div>
+        </div>
+      </div>
+      <div class="delta" id="r-delta">—</div>
+      <div class="tiers" id="r-tiers"></div>
+      <div class="tier-help">
+        T1 regulatory · T2 established press · T3 tech press · T4 analyst/aggregator · T5 blog/social/PR
+      </div>
+    </div>
+
     <div class="panels">
       <div class="panel">
         <div class="h">Overall Score</div>
@@ -544,17 +662,27 @@
     dims.forEach(([key, label]) => {
       const s = (r.scores && r.scores[key]) || {};
       const v = Number(s.score ?? 0);
+      const raw = Number(s.raw_score ?? v);
+      const truth = Number(s.truth_score ?? v);
+      const tier = Number(s.source_tier ?? 4);
       const color = colorForScore(v, key === "risk");
       const div = document.createElement("div");
       div.className = "score";
+      const rawTruthLine = (Math.abs(raw - truth) >= 0.5)
+        ? `<div class="raw-vs-truth">raw ${raw.toFixed(1)} → truth ${truth.toFixed(2)}</div>`
+        : "";
       div.innerHTML = `
         <div class="lbl">${label}${key === "risk" ? " (lower = better)" : ""}</div>
         <div class="v" style="color:${color}">${v}</div>
         <div class="reason">${escapeHtml(s.reasoning || "")}</div>
         ${s.source ? `<a class="src" href="${escapeAttr(s.source)}" target="_blank" rel="noopener">${escapeHtml(s.source)}</a>` : ""}
+        <span class="tier-badge t${tier}">Source tier T${tier}</span>
+        ${rawTruthLine}
       `;
       scoresEl.appendChild(div);
     });
+
+    renderTruthPanel(r);
 
     const citedA = document.getElementById("r-cited");
     if (r.cited_url && (!r.publish_fallback || r.served_locally)) {
@@ -622,6 +750,43 @@
     renderTrace(r);
 
     report.classList.add("show");
+  }
+
+  function renderTruthPanel(r) {
+    const raw = Number(r.overall_raw_score ?? r.overall_score ?? 0);
+    const truth = Number(r.overall_truth_score ?? r.overall_score ?? 0);
+    const delta = raw - truth;
+
+    document.getElementById("r-raw-score").textContent = raw.toFixed(1);
+    document.getElementById("r-truth-score").textContent = truth.toFixed(1);
+
+    const deltaEl = document.getElementById("r-delta");
+    if (Math.abs(delta) < 0.1) {
+      deltaEl.innerHTML = `<strong>Δ 0.0</strong> · fully triangulated, raw and truth align.`;
+    } else {
+      deltaEl.innerHTML = `<strong>Δ ${delta >= 0 ? "−" : "+"}${Math.abs(delta).toFixed(1)}</strong> · adjusted for source-tier weighting.`;
+    }
+
+    const badge = document.getElementById("r-pr-badge");
+    let level = "low", label = "PR shine: low";
+    if (Math.abs(delta) >= 1.5) { level = "high"; label = "PR shine: HIGH"; }
+    else if (Math.abs(delta) >= 0.7) { level = "medium"; label = "PR shine: medium"; }
+    badge.className = "pr-badge " + level;
+    badge.textContent = label;
+
+    const dist = r.tier_distribution || {};
+    const tiersEl = document.getElementById("r-tiers");
+    tiersEl.innerHTML = "";
+    ["T1","T2","T3","T4","T5"].forEach(t => {
+      const count = Number(dist[t] ?? 0);
+      const cell = document.createElement("div");
+      cell.className = "tier-cell" + (count > 0 ? " has-signal" : "");
+      cell.innerHTML = `
+        <div class="t-name">${t}</div>
+        <div class="t-count">${count}</div>
+      `;
+      tiersEl.appendChild(cell);
+    });
   }
 
   function renderTrace(r) {

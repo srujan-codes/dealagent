@@ -19,6 +19,7 @@ from core import nimble_client
 from core import clickhouse_client
 from core import senso_client
 from core import x402_client
+from core import credibility  # v2: source tiering + triangulation
 
 # ---------------------------------------------------------------------------
 # Datadog LLM Observability
@@ -130,13 +131,16 @@ async def research_agent(company: str, cb: ProgressCb) -> Dict[str, Any]:
     await _emit(cb, "research", f"Research Agent firing — 4 parallel Nimble searches on {company}...")
     with _task("dealagent.research"):
         signals = await nimble_client.parallel_search(company)
+        # v2: annotate every signal with credibility tier (T1-T5)
+        signals = credibility.annotate_research(signals)
         total = sum(len(v) for v in signals.values())
+        tier_dist = credibility.tier_distribution(signals)
         _annotate(
             input_data=f"company={company}",
-            output_data=f"{total} signals across 4 dimensions",
+            output_data=f"{total} signals across 4 dimensions; tier distribution: {tier_dist}",
             tags={"company": company, "agent": "research", "tool": "nimble"},
         )
-    await _emit(cb, "research", f"Research Agent complete — pulled {total} signals across 4 dimensions.")
+    await _emit(cb, "research", f"Research Agent complete — pulled {total} signals (tiers: {tier_dist}).")
     return signals
 
 
@@ -147,20 +151,32 @@ SCORING_PROMPT = """You are a senior VC analyst scoring a startup on 4 dimension
 
 Company: {company}
 
+Every research signal below is tagged with a credibility tier:
+  T1 (regulatory / first-party):  sec.gov, courts, USPTO, GitHub. Facts with LEGAL accountability.
+  T2 (established journalism):    WSJ, FT, Bloomberg, Reuters, NYT. Editorial standards.
+  T3 (tech / industry press):     TechCrunch, The Information, Axios, Wired.
+  T4 (analyst / aggregator):      LinkedIn, Wikipedia, SimilarWeb, Glassdoor.
+  T5 (blog / social / press):     Medium, Substack, Twitter, PR Newswire. Often PR-driven.
+
 Research signals (from live web search):
 {research}
 
-Score each dimension 0-10. For risk, higher score = MORE risk (so worse).
-EVERY score must cite a specific source URL from the research signals above.
-Return ONLY valid JSON, no prose, no markdown fences.
+Scoring rules:
+  1. Score each dimension 0-10 based on the EVIDENCE in the signals.
+  2. For risk, higher score = MORE risk (worse for the investor).
+  3. Strongly PREFER citing T1-T2 sources over T4-T5 sources.
+  4. The "source" field MUST be a URL that appears literally in the signals above.
+  5. The "source_tier" field MUST match the tier shown next to that source.
+  6. If a dimension has only T4-T5 sources, that's a soft signal — be more conservative.
+  7. Return ONLY valid JSON. No prose. No markdown fences.
 
 JSON schema:
 {{
   "scores": {{
-    "team":     {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url from research>"}},
-    "market":   {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url from research>"}},
-    "traction": {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url from research>"}},
-    "risk":     {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url from research>"}}
+    "team":     {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}},
+    "market":   {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}},
+    "traction": {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}},
+    "risk":     {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}}
   }},
   "verdict": "<one sharp investment verdict sentence>",
   "key_insight": "<the single most important finding>"
@@ -171,17 +187,18 @@ JSON schema:
 def _fallback_scores() -> Dict[str, Any]:
     return {
         "scores": {
-            "team":     {"score": 5, "reasoning": "Data unavailable.", "source": ""},
-            "market":   {"score": 5, "reasoning": "Data unavailable.", "source": ""},
-            "traction": {"score": 5, "reasoning": "Data unavailable.", "source": ""},
-            "risk":     {"score": 5, "reasoning": "Data unavailable.", "source": ""},
+            "team":     {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
+            "market":   {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
+            "traction": {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
+            "risk":     {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
         },
         "verdict": "Insufficient data — manual review recommended.",
-        "key_insight": "Scoring agent could not reach Claude API.",
+        "key_insight": "Scoring agent could not reach Groq API.",
     }
 
 
 def _research_for_prompt(research: Dict[str, Any], cap: int = 6) -> str:
+    """Render research with tier annotations for Llama to see."""
     chunks = []
     for cat, items in research.items():
         chunks.append(f"## {cat}")
@@ -189,8 +206,40 @@ def _research_for_prompt(research: Dict[str, Any], cap: int = 6) -> str:
             t = it.get("title", "")
             s = it.get("snippet", "")
             u = it.get("url", "")
-            chunks.append(f"- {t} | {s} | {u}")
+            tier = it.get("tier", credibility.classify_source(u))
+            chunks.append(f"- [T{tier}] {t} | {s} | {u}")
     return "\n".join(chunks)
+
+
+def _enrich_scores_with_triangulation(
+    scores: Dict[str, Any],
+    research: Dict[str, List[Dict]],
+) -> Dict[str, Any]:
+    """Compute per-dimension truth_score = raw * truth_discount(triangulation).
+
+    Mutates and returns the scores dict, adding fields:
+      raw_score, truth_score, triangulation, tier_weight (per dimension)
+    """
+    # Map dimension key → research category key
+    dim_to_cat = {
+        "team":     "founder_signals",
+        "market":   "market_signals",
+        "traction": "traction_signals",
+        "risk":     "risk_signals",
+    }
+    for dim, cat in dim_to_cat.items():
+        s = scores.get(dim, {})
+        raw = float(s.get("score", 0) or 0)
+        triang = credibility.triangulation_score(research.get(cat, []))
+        discount = credibility.truth_discount(triang)
+        # Pull toward neutral 5 when triangulation is weak: truth = 5 + (raw - 5) * discount
+        truth = round(5 + (raw - 5) * discount, 2)
+        s["raw_score"] = raw
+        s["truth_score"] = truth
+        s["triangulation"] = triang
+        s["tier_weight"] = discount
+        scores[dim] = s
+    return scores
 
 
 def _strip_json_fence(text: str) -> str:
@@ -234,7 +283,13 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
             scores = parsed.get("scores", {})
             for dim in ("team", "market", "traction", "risk"):
                 if dim not in scores:
-                    scores[dim] = {"score": 5, "reasoning": "Missing.", "source": ""}
+                    scores[dim] = {"score": 5, "reasoning": "Missing.", "source": "", "source_tier": 4}
+                # Ensure source_tier exists (Llama might omit it)
+                if "source_tier" not in scores[dim]:
+                    src = scores[dim].get("source", "")
+                    scores[dim]["source_tier"] = credibility.classify_source(src)
+            # v2: enrich with triangulation-discounted truth_score
+            scores = _enrich_scores_with_triangulation(scores, research)
             parsed["scores"] = scores
 
             # Annotate the LLM span with the full prompt+completion for Datadog
@@ -266,14 +321,19 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
                 tags={"company": company, "agent": "scoring", "error": True},
             )
             await _emit(cb, "scoring", f"Scoring Agent complete — fallback scores ({type(e).__name__}: {str(e)[:80]}).")
-            return _fallback_scores()
+            # Enrich even fallback scores with triangulation so the UI doesn't break
+            fb = _fallback_scores()
+            fb["scores"] = _enrich_scores_with_triangulation(fb["scores"], research)
+            return fb
 
 
-def _overall(scores: Dict[str, Any]) -> float:
-    team = float(scores.get("team", {}).get("score", 0))
-    market = float(scores.get("market", {}).get("score", 0))
-    traction = float(scores.get("traction", {}).get("score", 0))
-    risk = float(scores.get("risk", {}).get("score", 0))
+def _overall(scores: Dict[str, Any], use_truth: bool = False) -> float:
+    """Compute overall score. use_truth=False → raw (back-compat). use_truth=True → truth."""
+    key = "truth_score" if use_truth else "score"
+    team     = float(scores.get("team",     {}).get(key, 0) or 0)
+    market   = float(scores.get("market",   {}).get(key, 0) or 0)
+    traction = float(scores.get("traction", {}).get(key, 0) or 0)
+    risk     = float(scores.get("risk",     {}).get(key, 0) or 0)
     return round((team + market + traction + (10 - risk)) / 4.0, 2)
 
 
@@ -384,7 +444,10 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             timing,
         )
         scores = scoring.get("scores", {})
-        overall_score = _overall(scores)
+        overall_raw = _overall(scores, use_truth=False)
+        overall_truth = _overall(scores, use_truth=True)
+        # Use truth score for benchmarking (it's the more honest number)
+        overall_score = overall_truth
 
         # 3. Benchmark
         benchmark = await _timed(
@@ -393,12 +456,24 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             timing,
         )
 
+        # v2: compute summary stats for triangulation + tier distribution
+        triangulation_per_dim = credibility.triangulation_per_dimension(research)
+        tier_dist = credibility.tier_distribution(research)
+        avg_triangulation = round(
+            sum(triangulation_per_dim.values()) / max(1, len(triangulation_per_dim)), 3
+        )
+
         # Build the report so far (publisher needs it)
         report: Dict[str, Any] = {
             "report_id": report_id,
             "company_name": company_name,
             "scores": scores,
-            "overall_score": overall_score,
+            "overall_score": overall_score,            # back-compat: == overall_truth
+            "overall_raw_score": overall_raw,          # v2
+            "overall_truth_score": overall_truth,      # v2
+            "triangulation_per_dimension": triangulation_per_dim,
+            "avg_triangulation": avg_triangulation,
+            "tier_distribution": tier_dist,
             "verdict": scoring.get("verdict", ""),
             "key_insight": scoring.get("key_insight", ""),
             "benchmark": benchmark,
