@@ -491,6 +491,38 @@
   .burst-tag.detected { color: var(--red); border: 1px solid var(--red); }
   .burst-tag.clean    { color: var(--muted); border: 1px solid var(--border); }
 
+  /* v2.1 I: Citation graph (SVG bipartite) */
+  .cite-graph {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-top: 12px;
+  }
+  .cite-graph .head { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; }
+  .cite-graph svg { display: block; margin: 0 auto; max-width: 100%; }
+  .cite-graph .source-dot { cursor: pointer; transition: r 0.15s, fill 0.15s; }
+  .cite-graph .source-dot:hover { stroke-width: 2; }
+  .cite-graph .edge { stroke-opacity: 0.18; transition: stroke-opacity 0.15s, stroke-width 0.15s; pointer-events: none; }
+  .cite-graph .edge.hot { stroke-opacity: 0.95; stroke-width: 2.5; }
+  .cite-graph .source-dot.dimmed { opacity: 0.18; }
+  .cite-graph .dim-label.dimmed { opacity: 0.18; }
+  .cite-graph .source-dot.hot { stroke: #fff; stroke-width: 2; }
+  .cite-graph .dim-label.hot text { fill: #fff; }
+  .cite-graph .legend {
+    display: flex; justify-content: center; gap: 14px;
+    font-size: 10px; letter-spacing: 1px; color: var(--muted);
+    text-transform: uppercase; margin-top: 8px; flex-wrap: wrap;
+  }
+  .cite-graph .legend .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 4px; vertical-align: middle;
+  }
+  .cite-graph .tooltip {
+    text-align: center; font-size: 11px; color: var(--text);
+    min-height: 18px; margin-top: 6px; word-break: break-all;
+  }
+
   /* v2.1 H: Source-diversity radar (SVG) */
   .radar-panel {
     background: var(--surface-2);
@@ -757,6 +789,20 @@
       <div id="r-adversarial-list"></div>
     </div>
 
+    <!-- v2.1 I: Citation graph -->
+    <div class="cite-graph" id="r-cite-graph" style="display:none;">
+      <div class="head">Citation Graph · which sources support which dimensions</div>
+      <svg id="r-cite-svg" width="700" height="520" viewBox="0 0 700 520"></svg>
+      <div class="tooltip" id="r-cite-tooltip">hover any source dot or dimension to highlight its citations</div>
+      <div class="legend">
+        <span><span class="swatch" style="background:#3ddc97"></span>T1 regulatory</span>
+        <span><span class="swatch" style="background:#00d4aa"></span>T2 journalism</span>
+        <span><span class="swatch" style="background:#7c6dfa"></span>T3 tech press</span>
+        <span><span class="swatch" style="background:#ffaa3b"></span>T4 aggregator</span>
+        <span><span class="swatch" style="background:#ff5a6b"></span>T5 blog/social</span>
+      </div>
+    </div>
+
     <!-- v2.1 H: Source-diversity radar -->
     <div class="radar-panel" id="r-radar" style="display:none;">
       <div class="head">Source Diversity Radar · by dimension</div>
@@ -951,8 +997,214 @@
     renderNumbers(r);
     renderAdversarial(r);
     renderRadar(r);
+    renderCitationGraph(r);
 
     report.classList.add("show");
+  }
+
+  // v2.1 I: Citation graph — bipartite SVG, sources by tier on left, dimensions on right
+  function renderCitationGraph(r) {
+    const research = r.research || {};
+    const dimMeta = [
+      { key: "founder_signals",  label: "TEAM",     color: "#7c6dfa" },
+      { key: "traction_signals", label: "TRACTION", color: "#3ddc97" },
+      { key: "market_signals",   label: "MARKET",   color: "#00d4aa" },
+      { key: "risk_signals",     label: "RISK",     color: "#ff5a6b" },
+    ];
+    const tierColor = { 1: "#3ddc97", 2: "#00d4aa", 3: "#7c6dfa", 4: "#ffaa3b", 5: "#ff5a6b" };
+
+    // Aggregate: source URL → {tier, dims set, title}
+    const bySource = new Map();
+    for (const dm of dimMeta) {
+      const items = research[dm.key] || [];
+      for (const s of items) {
+        const url = s.url || "";
+        if (!url) continue;
+        if (!bySource.has(url)) {
+          bySource.set(url, {
+            url,
+            tier: Number(s.tier ?? 4),
+            title: s.title || hostnameOf(url),
+            dims: new Set(),
+          });
+        }
+        bySource.get(url).dims.add(dm.key);
+      }
+    }
+    const sources = Array.from(bySource.values());
+    const el = document.getElementById("r-cite-graph");
+    const svg = document.getElementById("r-cite-svg");
+    const tt = document.getElementById("r-cite-tooltip");
+    if (sources.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+
+    // Group by tier, sort within tier
+    const tierGroups = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+    sources.forEach(s => tierGroups[s.tier].push(s));
+    for (const t of [1, 2, 3, 4, 5]) {
+      tierGroups[t].sort((a, b) => a.title.localeCompare(b.title));
+    }
+
+    // Layout constants
+    const W = 700, H = 520;
+    const leftX = 60;
+    const rightX = W - 200;
+    const topPad = 30, botPad = 30;
+    const usable = H - topPad - botPad;
+
+    // Vertically place sources by tier band
+    const totalSources = sources.length;
+    let yCursor = topPad;
+    const tierBandY = {};
+    const tierBandH = {};
+    [1, 2, 3, 4, 5].forEach(t => {
+      const count = tierGroups[t].length;
+      const bandH = (count / totalSources) * usable;
+      tierBandY[t] = yCursor;
+      tierBandH[t] = bandH;
+      yCursor += bandH;
+    });
+
+    // Compute y position for each source
+    const sourceXY = new Map();
+    [1, 2, 3, 4, 5].forEach(t => {
+      const arr = tierGroups[t];
+      arr.forEach((s, i) => {
+        const y = tierBandY[t] + ((i + 0.5) / Math.max(1, arr.length)) * tierBandH[t];
+        sourceXY.set(s.url, { x: leftX, y });
+      });
+    });
+
+    // Dimension positions — evenly spaced on the right
+    const dimXY = {};
+    dimMeta.forEach((dm, i) => {
+      const y = topPad + ((i + 0.5) / dimMeta.length) * usable;
+      dimXY[dm.key] = { x: rightX, y, label: dm.label, color: dm.color };
+    });
+
+    // Build SVG
+    let html = "";
+
+    // Tier band labels on far left
+    [1, 2, 3, 4, 5].forEach(t => {
+      if (tierGroups[t].length === 0) return;
+      const y = tierBandY[t] + tierBandH[t] / 2;
+      html += `<text x="14" y="${y + 4}" font-family="Space Mono, monospace" font-size="10" fill="${tierColor[t]}" letter-spacing="1.5">T${t}</text>`;
+      // Subtle band background
+      html += `<rect x="44" y="${tierBandY[t]}" width="${rightX - 44 - 20}" height="${tierBandH[t]}" fill="${tierColor[t]}" opacity="0.025"/>`;
+    });
+
+    // Edges (drawn first so dots+labels sit on top)
+    sources.forEach(s => {
+      const a = sourceXY.get(s.url);
+      s.dims.forEach(dimKey => {
+        const b = dimXY[dimKey];
+        if (!b) return;
+        // Bezier curve: control points stretch horizontally
+        const cx1 = a.x + (b.x - a.x) * 0.4;
+        const cx2 = a.x + (b.x - a.x) * 0.6;
+        html += `<path class="edge" data-source="${escapeAttr(s.url)}" data-dim="${dimKey}"
+                       d="M ${a.x},${a.y} C ${cx1},${a.y} ${cx2},${b.y} ${b.x},${b.y}"
+                       fill="none" stroke="${tierColor[s.tier]}" stroke-width="1"/>`;
+      });
+    });
+
+    // Source dots
+    sources.forEach(s => {
+      const a = sourceXY.get(s.url);
+      const r2 = 6 - Math.min(3, (totalSources - 30) * 0.05);
+      html += `<circle class="source-dot" data-source="${escapeAttr(s.url)}"
+                     cx="${a.x}" cy="${a.y}" r="${Math.max(3, r2).toFixed(1)}"
+                     fill="${tierColor[s.tier]}" stroke="${tierColor[s.tier]}" stroke-opacity="0.4"/>`;
+    });
+
+    // Dimension labels on right
+    dimMeta.forEach(dm => {
+      const b = dimXY[dm.key];
+      const count = sources.filter(s => s.dims.has(dm.key)).length;
+      html += `<g class="dim-label" data-dim="${dm.key}">
+        <rect x="${b.x - 8}" y="${b.y - 16}" width="160" height="32" rx="6" fill="${dm.color}" fill-opacity="0.08" stroke="${dm.color}" stroke-opacity="0.4"/>
+        <text x="${b.x + 6}" y="${b.y + 5}" font-family="Syne, sans-serif" font-size="14" font-weight="700" fill="${dm.color}" letter-spacing="0.5">${dm.label}</text>
+        <text x="${b.x + 140}" y="${b.y + 5}" text-anchor="end" font-family="Space Mono, monospace" font-size="10" fill="#8b8ba0">${count} src</text>
+        <circle cx="${b.x}" cy="${b.y}" r="4" fill="${dm.color}"/>
+      </g>`;
+    });
+
+    svg.innerHTML = html;
+
+    // Hover handlers (delegated)
+    const clearHot = () => {
+      svg.querySelectorAll(".edge.hot").forEach(e => e.classList.remove("hot"));
+      svg.querySelectorAll(".source-dot.hot").forEach(d => d.classList.remove("hot"));
+      svg.querySelectorAll(".source-dot.dimmed").forEach(d => d.classList.remove("dimmed"));
+      svg.querySelectorAll(".dim-label.hot").forEach(d => d.classList.remove("hot"));
+      svg.querySelectorAll(".dim-label.dimmed").forEach(d => d.classList.remove("dimmed"));
+    };
+
+    const setTooltip = (msg) => { tt.textContent = msg; };
+
+    svg.querySelectorAll(".source-dot").forEach(dot => {
+      dot.addEventListener("mouseenter", () => {
+        clearHot();
+        const url = dot.getAttribute("data-source");
+        // Dim everything else
+        svg.querySelectorAll(".source-dot").forEach(d => {
+          if (d.getAttribute("data-source") !== url) d.classList.add("dimmed");
+        });
+        svg.querySelectorAll(".dim-label").forEach(d => d.classList.add("dimmed"));
+        // Highlight matching edges + dim labels
+        const hot = svg.querySelectorAll(`.edge[data-source="${cssEscape(url)}"]`);
+        const linkedDims = new Set();
+        hot.forEach(e => {
+          e.classList.add("hot");
+          linkedDims.add(e.getAttribute("data-dim"));
+        });
+        linkedDims.forEach(dk => {
+          const dl = svg.querySelector(`.dim-label[data-dim="${dk}"]`);
+          if (dl) { dl.classList.remove("dimmed"); dl.classList.add("hot"); }
+        });
+        dot.classList.remove("dimmed");
+        dot.classList.add("hot");
+        const meta = bySource.get(url);
+        setTooltip(`T${meta.tier} · ${meta.title} · cited in: ${Array.from(linkedDims).join(", ")}`);
+      });
+    });
+
+    svg.querySelectorAll(".dim-label").forEach(label => {
+      label.addEventListener("mouseenter", () => {
+        clearHot();
+        const dimKey = label.getAttribute("data-dim");
+        svg.querySelectorAll(".dim-label").forEach(d => {
+          if (d.getAttribute("data-dim") !== dimKey) d.classList.add("dimmed");
+        });
+        // Find all sources connected to this dim, highlight their dots + edges
+        const hotEdges = svg.querySelectorAll(`.edge[data-dim="${dimKey}"]`);
+        const hotSources = new Set();
+        hotEdges.forEach(e => {
+          e.classList.add("hot");
+          hotSources.add(e.getAttribute("data-source"));
+        });
+        svg.querySelectorAll(".source-dot").forEach(d => {
+          const url = d.getAttribute("data-source");
+          if (hotSources.has(url)) { d.classList.add("hot"); }
+          else { d.classList.add("dimmed"); }
+        });
+        label.classList.remove("dimmed");
+        label.classList.add("hot");
+        const dmInfo = dimMeta.find(m => m.key === dimKey);
+        setTooltip(`${dmInfo.label} · cited by ${hotSources.size} sources`);
+      });
+    });
+
+    svg.addEventListener("mouseleave", () => {
+      clearHot();
+      setTooltip("hover any source dot or dimension to highlight its citations");
+    });
+  }
+
+  function cssEscape(s) {
+    // Minimal CSS attribute-value escape for our selectors
+    return String(s).replace(/(["\\])/g, "\\$1");
   }
 
   // v2.1: Investment recommendation matrix
