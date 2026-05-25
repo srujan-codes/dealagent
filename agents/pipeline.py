@@ -26,6 +26,10 @@ from core import courtlistener_client  # v2: T1 legal-risk signals
 from core import pr_detection      # v2: coordinated-PR detection + time bursts
 from core import wikidata_client   # v2.1 A: T1 structured facts
 from core import numerics          # v2.1 B: numerical claims + contradictions
+from core import specialists       # v3-1: multi-agent decomposition
+from core import critic            # v3-2: self-critique / evidence-quality review
+from core import grounding         # v3-3: claim grounding / provenance
+from core import trajectory        # v3-4: temporal momentum per dimension
 
 # ---------------------------------------------------------------------------
 # Datadog LLM Observability
@@ -355,7 +359,8 @@ def _strip_json_fence(text: str) -> str:
 
 
 async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) -> Dict[str, Any]:
-    await _emit(cb, "scoring", f"Scoring Agent firing — Groq ({config.GROQ_MODEL}) analyzing signals...")
+    """v3-1: Now runs a multi-agent committee — 4 specialists + synthesizer."""
+    await _emit(cb, "scoring", f"Scoring Committee firing — 4 specialists + synthesizer ({config.GROQ_MODEL})...")
     with _llm("dealagent.scoring", model_name=config.GROQ_MODEL, model_provider="groq"):
         if not config.have_groq():
             _annotate(
@@ -369,30 +374,27 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
         try:
             from groq import AsyncGroq
             client = AsyncGroq(api_key=config.GROQ_API_KEY)
-            prompt = SCORING_PROMPT.format(
-                company=company,
-                research=_research_for_prompt(research),
-            )
-            completion = await client.chat.completions.create(
+
+            # v3-1: Multi-agent committee — 4 specialists in parallel + synthesizer
+            parsed = await specialists.run_committee(
+                client=client,
                 model=config.GROQ_MODEL,
-                max_tokens=1500,
-                temperature=0.3,
-                response_format={"type": "json_object"},
-                messages=[{"role": "user", "content": prompt}],
+                company=company,
+                research=research,
+                llm_span_factory=_llm,
+                annotate=_annotate,
             )
-            text = completion.choices[0].message.content or ""
-            text_clean = _strip_json_fence(text)
-            parsed = json.loads(text_clean)
-            # sanity
+
+            # Sanity + tier annotation
             scores = parsed.get("scores", {})
             for dim in ("team", "market", "traction", "risk"):
                 if dim not in scores:
                     scores[dim] = {"score": 5, "reasoning": "Missing.", "source": "", "source_tier": 4}
-                # Ensure source_tier exists (Llama might omit it)
                 if "source_tier" not in scores[dim]:
                     src = scores[dim].get("source", "")
                     scores[dim]["source_tier"] = credibility.classify_source(src)
-            # v2: detect coordinated PR shine, then enrich with triangulation + PR discount
+
+            # v2: detect PR shine, then enrich with triangulation + PR discount
             pr_signal = pr_detection.detect_pr_shine(research)
             scores = _enrich_scores_with_triangulation(
                 scores, research, pr_shine=pr_signal["pr_shine_score"],
@@ -400,31 +402,15 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
             parsed["scores"] = scores
             parsed["pr_shine"] = pr_signal
 
-            # Annotate the LLM span with the full prompt+completion for Datadog
-            usage = getattr(completion, "usage", None)
-            metadata = {
-                "temperature": 0.3,
-                "max_tokens": 1500,
-                "response_format": "json_object",
-            }
-            metrics = {}
-            if usage is not None:
-                metrics["input_tokens"] = getattr(usage, "prompt_tokens", 0) or 0
-                metrics["output_tokens"] = getattr(usage, "completion_tokens", 0) or 0
-                metrics["total_tokens"] = getattr(usage, "total_tokens", 0) or 0
-            _annotate(
-                input_data=[{"role": "user", "content": prompt}],
-                output_data=[{"role": "assistant", "content": text}],
-                metadata=metadata,
-                metrics=metrics,
-                tags={"company": company, "agent": "scoring"},
+            spec_count = len(parsed.get("_specialist_outputs", {}))
+            await _emit(
+                cb, "scoring",
+                f"Scoring Committee complete — {spec_count} specialists + synthesizer, 4 dimensions scored.",
             )
-
-            await _emit(cb, "scoring", "Scoring Agent complete — 4 dimensions scored with sources.")
             return parsed
         except Exception as e:
             _annotate(
-                input_data=str(prompt) if "prompt" in locals() else "(prompt failed to build)",
+                input_data="(scoring committee failed)",
                 output_data=f"ERROR: {type(e).__name__}: {str(e)[:200]}",
                 tags={"company": company, "agent": "scoring", "error": True},
             )
@@ -680,6 +666,16 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         )
         scores = scoring.get("scores", {})
 
+        # v3-3: Ground every score in its actual source snippet
+        scoring = grounding.ground_scores(scoring, research)
+
+        # v3-2: Critic review — flag weak evidence, downgrade confidence
+        critic_review = critic.review(scoring, research)
+        if scoring.get("recommendation"):
+            scoring["recommendation"] = critic.maybe_downgrade_confidence(
+                scoring["recommendation"], critic_review,
+            )
+
         # v2.1 G: adversarial counter-arguments may downgrade truth scores
         adversarial = await _timed(
             "adversarial",
@@ -710,6 +706,8 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         num_claims, num_contras, num_summary = numerics.extract_all_numerics(research)
         # v2.1 C: time-burst detection
         time_burst = pr_detection.detect_time_burst(research)
+        # v3-4: per-dimension temporal trajectory
+        trajectory_per_dim = trajectory.analyze(research)
 
         # Build the report so far (publisher needs it)
         report: Dict[str, Any] = {
@@ -735,6 +733,10 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             "numerical_summary": num_summary,        # v2.1 B
             "time_burst": time_burst,                # v2.1 C
             "adversarial": adversarial,              # v2.1 G
+            "critic_review": critic_review,          # v3-2
+            "specialist_outputs": scoring.get("_specialist_outputs", {}),  # v3-1
+            "trajectory": trajectory_per_dim,        # v3-4
+            "provenance_summary": scoring.get("provenance_summary", {}),  # v3-3
         }
 
         # 4. Publish
