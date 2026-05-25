@@ -23,7 +23,9 @@ from core import credibility       # v2: source tiering + triangulation
 from core import github_client     # v2: T1 engineering signals
 from core import sec_edgar_client  # v2: T1 regulatory signals
 from core import courtlistener_client  # v2: T1 legal-risk signals
-from core import pr_detection      # v2: coordinated-PR detection
+from core import pr_detection      # v2: coordinated-PR detection + time bursts
+from core import wikidata_client   # v2.1 A: T1 structured facts
+from core import numerics          # v2.1 B: numerical claims + contradictions
 
 # ---------------------------------------------------------------------------
 # Datadog LLM Observability
@@ -141,13 +143,14 @@ async def research_agent(company: str, cb: ProgressCb) -> Dict[str, Any]:
     """
     await _emit(cb, "research", f"Research Agent firing — Nimble + GitHub + SEC + CourtListener in parallel on {company}...")
     with _task("dealagent.research"):
-        # Fire all 4 source agents concurrently
+        # Fire all 5 source agents concurrently (v2 + v2.1 Wikidata)
         nimble_task = nimble_client.parallel_search(company)
         github_task = github_client.engineering_signals(company)
         sec_task = sec_edgar_client.regulatory_signals(company)
         court_task = courtlistener_client.legal_signals(company)
-        nimble_res, gh_res, sec_res, court_res = await asyncio.gather(
-            nimble_task, github_task, sec_task, court_task,
+        wikidata_task = wikidata_client.company_facts(company)
+        nimble_res, gh_res, sec_res, court_res, wd_res = await asyncio.gather(
+            nimble_task, github_task, sec_task, court_task, wikidata_task,
             return_exceptions=True,
         )
 
@@ -171,6 +174,13 @@ async def research_agent(company: str, cb: ProgressCb) -> Dict[str, Any]:
         # CourtListener → all risk
         if isinstance(court_res, list) and court_res:
             signals.setdefault("risk_signals", []).extend(court_res[:5])
+        # Wikidata structured facts → team (CEO, founder) + traction (employees, funding)
+        wikidata_facts: Dict[str, Any] = {}
+        if isinstance(wd_res, dict) and wd_res:
+            wd_signals = wikidata_client.facts_as_signals(wd_res)
+            signals.setdefault("founder_signals", []).extend(wd_signals)
+            signals.setdefault("traction_signals", []).extend(wd_signals)
+            wikidata_facts = wd_res
 
         # Tally
         total = sum(len(v) for v in signals.values())
@@ -186,22 +196,24 @@ async def research_agent(company: str, cb: ProgressCb) -> Dict[str, Any]:
             ),
             tags={"company": company, "agent": "research", "tools": "nimble+github+sec+courtlistener"},
         )
+    wd_label = ("Wikidata ✓" if wikidata_facts else "Wikidata ∅")
     await _emit(
         cb, "research",
-        f"Research Agent complete — {total} signals (Nimble + {gh_count} GitHub + {sec_count} SEC + {court_count} Court) · tiers: {tier_dist}",
+        f"Research Agent complete — {total} signals (Nimble + {gh_count} GitHub + {sec_count} SEC + {court_count} Court + {wd_label}) · tiers: {tier_dist}",
     )
-    return signals
+    # Return signals + a tuple of extras so the orchestrator can surface them.
+    return {"_signals": signals, "_wikidata_facts": wikidata_facts}
 
 
 # -----------------------------------------------------------------------------
 # Agent 2 — Scoring (Claude)
 # -----------------------------------------------------------------------------
-SCORING_PROMPT = """You are a senior VC analyst scoring a startup on 4 dimensions: team, market, traction, risk.
+SCORING_PROMPT = """You are a senior VC analyst writing a detailed due diligence memo.
 
 Company: {company}
 
 Every research signal below is tagged with a credibility tier:
-  T1 (regulatory / first-party):  sec.gov, courts, USPTO, GitHub. Facts with LEGAL accountability.
+  T1 (regulatory / first-party):  sec.gov, courts, USPTO, GitHub, Wikidata. Facts with LEGAL accountability.
   T2 (established journalism):    WSJ, FT, Bloomberg, Reuters, NYT. Editorial standards.
   T3 (tech / industry press):     TechCrunch, The Information, Axios, Wired.
   T4 (analyst / aggregator):      LinkedIn, Wikipedia, SimilarWeb, Glassdoor.
@@ -217,7 +229,12 @@ Scoring rules:
   4. The "source" field MUST be a URL that appears literally in the signals above.
   5. The "source_tier" field MUST match the tier shown next to that source.
   6. If a dimension has only T4-T5 sources, that's a soft signal — be more conservative.
-  7. Return ONLY valid JSON. No prose. No markdown fences.
+  7. The risk dimension must include a 5-part breakdown (regulatory, competitive,
+     execution, financial, ip_legal). Each sub-score 0-10 with its own reasoning.
+  8. The recommendation field must include: action (PASS / MONITOR / INVEST /
+     STRONG_INVEST), confidence (LOW / MEDIUM / HIGH), and 2-3 upgrade + downgrade
+     conditions.
+  9. Return ONLY valid JSON. No prose. No markdown fences.
 
 JSON schema:
 {{
@@ -225,24 +242,58 @@ JSON schema:
     "team":     {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}},
     "market":   {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}},
     "traction": {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}},
-    "risk":     {{"score": <0-10>, "reasoning": "<1 sentence>", "source": "<url>", "source_tier": <1-5>}}
+    "risk":     {{
+        "score": <0-10>, "reasoning": "<1 sentence aggregate>",
+        "source": "<url>", "source_tier": <1-5>,
+        "breakdown": {{
+            "regulatory":  {{"score": <0-10>, "reasoning": "<1 sentence>"}},
+            "competitive": {{"score": <0-10>, "reasoning": "<1 sentence>"}},
+            "execution":   {{"score": <0-10>, "reasoning": "<1 sentence>"}},
+            "financial":   {{"score": <0-10>, "reasoning": "<1 sentence>"}},
+            "ip_legal":    {{"score": <0-10>, "reasoning": "<1 sentence>"}}
+        }}
+    }}
   }},
   "verdict": "<one sharp investment verdict sentence>",
-  "key_insight": "<the single most important finding>"
+  "key_insight": "<the single most important finding>",
+  "recommendation": {{
+    "action": "<PASS | MONITOR | INVEST | STRONG_INVEST>",
+    "confidence": "<LOW | MEDIUM | HIGH>",
+    "rationale": "<one sentence why>",
+    "upgrade_conditions": ["<bullet 1>", "<bullet 2>"],
+    "downgrade_conditions": ["<bullet 1>", "<bullet 2>"]
+  }}
 }}
 """
 
 
 def _fallback_scores() -> Dict[str, Any]:
+    risk_blank = {
+        "score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4,
+        "breakdown": {
+            "regulatory":  {"score": 5, "reasoning": "Insufficient data."},
+            "competitive": {"score": 5, "reasoning": "Insufficient data."},
+            "execution":   {"score": 5, "reasoning": "Insufficient data."},
+            "financial":   {"score": 5, "reasoning": "Insufficient data."},
+            "ip_legal":    {"score": 5, "reasoning": "Insufficient data."},
+        },
+    }
     return {
         "scores": {
             "team":     {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
             "market":   {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
             "traction": {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
-            "risk":     {"score": 5, "reasoning": "Data unavailable.", "source": "", "source_tier": 4},
+            "risk":     risk_blank,
         },
         "verdict": "Insufficient data — manual review recommended.",
         "key_insight": "Scoring agent could not reach Groq API.",
+        "recommendation": {
+            "action": "PASS",
+            "confidence": "LOW",
+            "rationale": "Cannot make a recommendation without scoring data.",
+            "upgrade_conditions": ["Retry analysis after API reconnects"],
+            "downgrade_conditions": [],
+        },
     }
 
 
@@ -388,6 +439,125 @@ async def scoring_agent(company: str, research: Dict[str, Any], cb: ProgressCb) 
             return fb
 
 
+ADVERSARIAL_PROMPT = """You are a skeptical contrarian VC analyst. Your job is to STEELMAN the case AGAINST investing in {company}.
+
+Below are the current DD scores and reasoning. For each dimension scored >=7,
+write the strongest plausible counter-argument USING ONLY EVIDENCE THAT COULD
+BE PULLED FROM THE RESEARCH SIGNALS. Don't invent facts.
+
+Current scores:
+{score_summary}
+
+Research signals (for grounding your counter-arguments):
+{research_brief}
+
+Return JSON only:
+{{
+  "counter_arguments": [
+    {{
+      "dimension": "<team|market|traction|risk>",
+      "current_score": <number>,
+      "counter": "<one strong sentence arguing the score should be lower>",
+      "suggested_adjustment": <-2.0 to 0.0>
+    }}
+  ]
+}}
+
+Only include dimensions you have a substantive counter for. If you can't find a real counter-argument, leave the array empty.
+"""
+
+
+async def adversarial_agent(
+    company: str, scoring: Dict[str, Any], research: Dict[str, List[Dict]], cb: ProgressCb
+) -> Dict[str, Any]:
+    """v2.1 G — generate steelmanned counter-arguments for high scores.
+
+    Returns a dict with applied adjustments and counter-arguments. The
+    final scoring result is mutated in place (truth_score downgraded for
+    dimensions with compelling counters).
+    """
+    await _emit(cb, "adversarial", "Adversarial Agent firing — generating steelman counter-arguments...")
+    out: Dict[str, Any] = {"counter_arguments": [], "applied_adjustments": []}
+
+    if not config.have_groq():
+        await _emit(cb, "adversarial", "Adversarial Agent complete — no Groq key, skipped.")
+        return out
+
+    # Build score summary (only dims >= 7 are eligible)
+    scores = scoring.get("scores", {})
+    eligible = []
+    for dim in ("team", "market", "traction"):
+        s = scores.get(dim, {})
+        score = float(s.get("score", 0) or 0)
+        if score >= 7:
+            eligible.append(f"  {dim}: {score}/10 — {s.get('reasoning','')[:120]}")
+    if not eligible:
+        await _emit(cb, "adversarial", "Adversarial Agent complete — no high scores to challenge.")
+        return out
+
+    score_summary = "\n".join(eligible)
+    research_brief = _research_for_prompt(research, cap=4)
+
+    try:
+        from groq import AsyncGroq
+        client = AsyncGroq(api_key=config.GROQ_API_KEY)
+        with _llm("dealagent.adversarial", model_name=config.GROQ_MODEL, model_provider="groq"):
+            completion = await client.chat.completions.create(
+                model=config.GROQ_MODEL,
+                max_tokens=800,
+                temperature=0.5,
+                response_format={"type": "json_object"},
+                messages=[{
+                    "role": "user",
+                    "content": ADVERSARIAL_PROMPT.format(
+                        company=company,
+                        score_summary=score_summary,
+                        research_brief=research_brief,
+                    ),
+                }],
+            )
+            text = completion.choices[0].message.content or "{}"
+            try:
+                parsed = json.loads(_strip_json_fence(text))
+            except Exception:
+                parsed = {}
+            counters = parsed.get("counter_arguments", [])
+            if isinstance(counters, list):
+                out["counter_arguments"] = counters[:4]
+
+            # Apply nudges to truth_score for dimensions with substantive counters
+            for c in out["counter_arguments"]:
+                dim = c.get("dimension")
+                adj = float(c.get("suggested_adjustment", 0) or 0)
+                counter_text = c.get("counter", "")
+                if dim in scores and len(counter_text) > 40 and -2.0 <= adj <= 0:
+                    truth = scores[dim].get("truth_score")
+                    if isinstance(truth, (int, float)):
+                        new_truth = round(max(0.0, truth + adj), 2)
+                        scores[dim]["truth_score"] = new_truth
+                        scores[dim]["adversarial_adjustment"] = adj
+                        out["applied_adjustments"].append({
+                            "dimension": dim,
+                            "before": truth,
+                            "after": new_truth,
+                            "delta": adj,
+                            "counter": counter_text[:160],
+                        })
+            _annotate(
+                input_data=score_summary[:400],
+                output_data=f"{len(out['counter_arguments'])} counter-args, {len(out['applied_adjustments'])} applied",
+                tags={"company": company, "agent": "adversarial"},
+            )
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {str(e)[:120]}"
+
+    await _emit(
+        cb, "adversarial",
+        f"Adversarial Agent complete — {len(out['counter_arguments'])} counter-args, {len(out['applied_adjustments'])} truth-score adjustments.",
+    )
+    return out
+
+
 def _overall(scores: Dict[str, Any], use_truth: bool = False) -> float:
     """Compute overall score. use_truth=False → raw (back-compat). use_truth=True → truth."""
     key = "truth_score" if use_truth else "score"
@@ -491,11 +661,15 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
         )
         await _emit(progress_callback, "start", f"DealAgent kicking off due diligence on {company_name}...")
 
-        # 1. Research
-        research = await _timed(
+        # 1. Research (returns dict with _signals + _wikidata_facts)
+        research_bundle = await _timed(
             "research",
             research_agent(company_name, progress_callback),
             timing,
+        )
+        research = research_bundle.get("_signals", {}) if isinstance(research_bundle, dict) else {}
+        wikidata_facts = (
+            research_bundle.get("_wikidata_facts", {}) if isinstance(research_bundle, dict) else {}
         )
 
         # 2. Scoring
@@ -505,6 +679,14 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             timing,
         )
         scores = scoring.get("scores", {})
+
+        # v2.1 G: adversarial counter-arguments may downgrade truth scores
+        adversarial = await _timed(
+            "adversarial",
+            adversarial_agent(company_name, scoring, research, progress_callback),
+            timing,
+        )
+
         overall_raw = _overall(scores, use_truth=False)
         overall_truth = _overall(scores, use_truth=True)
         # Use truth score for benchmarking (it's the more honest number)
@@ -524,6 +706,11 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             sum(triangulation_per_dim.values()) / max(1, len(triangulation_per_dim)), 3
         )
 
+        # v2.1 B: extract numerical claims + detect contradictions
+        num_claims, num_contras, num_summary = numerics.extract_all_numerics(research)
+        # v2.1 C: time-burst detection
+        time_burst = pr_detection.detect_time_burst(research)
+
         # Build the report so far (publisher needs it)
         report: Dict[str, Any] = {
             "report_id": report_id,
@@ -538,8 +725,16 @@ async def run_dealagent(company_name: str, progress_callback: ProgressCb = None)
             "pr_shine": scoring.get("pr_shine", {}),   # v2 phase 5
             "verdict": scoring.get("verdict", ""),
             "key_insight": scoring.get("key_insight", ""),
+            "recommendation": scoring.get("recommendation", {}),  # v2.1 E
             "benchmark": benchmark,
             "research": research,
+            # v2.1 surface fields
+            "wikidata_facts": wikidata_facts,        # v2.1 A
+            "numerical_claims": num_claims,          # v2.1 B
+            "numerical_contradictions": num_contras, # v2.1 B
+            "numerical_summary": num_summary,        # v2.1 B
+            "time_burst": time_burst,                # v2.1 C
+            "adversarial": adversarial,              # v2.1 G
         }
 
         # 4. Publish

@@ -18,7 +18,7 @@ tier-only discount would.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 # Words that appear in almost every business snippet — exclude from
 # similarity matching so legitimate-looking content doesn't trigger.
@@ -150,3 +150,101 @@ def apply_pr_shine_to_truth_discount(base_discount: float, pr_shine: float) -> f
     A maximally-suspicious PR shine (1.0) shaves up to 40% off the base discount.
     """
     return round(max(0.2, base_discount * (1.0 - pr_shine * 0.4)), 3)
+
+
+# ---------------------------------------------------------------------------
+# Time-burst detection (v2.1 C)
+# ---------------------------------------------------------------------------
+
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+    "january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10,
+    "november": 11, "december": 12,
+}
+
+# "May 4, 2026", "May 2026", "2026-05-04", "5/4/2026"
+_DATE_PATTERNS = [
+    re.compile(r"\b(\d{4})-(\d{1,2})(?:-\d{1,2})?\b"),
+    re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2})?,?\s*(\d{4})\b"),
+    re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"),
+]
+
+
+def _extract_year_month(text: str) -> Optional[Tuple[int, int]]:
+    """Pull the first parseable year-month from a snippet/title. Returns (year, month) or None."""
+    if not text:
+        return None
+    # ISO date
+    m = _DATE_PATTERNS[0].search(text)
+    if m:
+        try:
+            y, mo = int(m.group(1)), int(m.group(2))
+            if 2018 <= y <= 2030 and 1 <= mo <= 12:
+                return (y, mo)
+        except ValueError:
+            pass
+    # "May 4, 2026" or "May 2026"
+    m = _DATE_PATTERNS[1].search(text)
+    if m:
+        month_word = m.group(1).lower()
+        if month_word in _MONTHS:
+            try:
+                y = int(m.group(3))
+                if 2018 <= y <= 2030:
+                    return (y, _MONTHS[month_word])
+            except ValueError:
+                pass
+    # "5/4/2026"
+    m = _DATE_PATTERNS[2].search(text)
+    if m:
+        try:
+            mo, y = int(m.group(1)), int(m.group(3))
+            if 2018 <= y <= 2030 and 1 <= mo <= 12:
+                return (y, mo)
+        except ValueError:
+            pass
+    return None
+
+
+def detect_time_burst(research: Dict[str, List[Dict]]) -> Dict[str, Any]:
+    """Detect if a suspicious % of coverage clusters in a short time window.
+
+    A 'burst' = >60% of dated signals fall in the same calendar month.
+    Returns {burst_detected, peak_month, peak_count, total_dated, fraction}.
+    """
+    snippets = _all_snippets(research)
+    dated: Dict[Tuple[int, int], int] = {}
+    samples_by_month: Dict[Tuple[int, int], List[str]] = {}
+    for s in snippets:
+        ym = _extract_year_month(s.get("snippet", ""))
+        if ym is None:
+            continue
+        dated[ym] = dated.get(ym, 0) + 1
+        samples_by_month.setdefault(ym, []).append(s.get("url", ""))
+
+    total = sum(dated.values())
+    if total < 4:
+        return {
+            "burst_detected": False,
+            "total_dated_signals": total,
+            "peak_month": None,
+            "peak_count": 0,
+            "fraction": 0.0,
+            "note": "too few dated signals to assess timing",
+        }
+    peak = max(dated, key=dated.get)
+    peak_count = dated[peak]
+    fraction = round(peak_count / total, 3)
+    return {
+        "burst_detected": fraction >= 0.60,
+        "total_dated_signals": total,
+        "peak_month": f"{peak[0]:04d}-{peak[1]:02d}",
+        "peak_count": peak_count,
+        "fraction": fraction,
+        "note": (
+            f"{peak_count}/{total} dated signals from {peak[0]}-{peak[1]:02d}"
+            + (" — possible coordinated campaign" if fraction >= 0.60 else "")
+        ),
+    }

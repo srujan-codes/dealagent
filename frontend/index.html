@@ -361,6 +361,148 @@
     text-align: center;
   }
 
+  /* v2.1: Recommendation matrix */
+  .reco {
+    background: linear-gradient(180deg, rgba(124,109,250,0.12), rgba(0,212,170,0.04));
+    border: 1px solid var(--purple);
+    border-radius: 10px;
+    padding: 18px;
+    margin-top: 12px;
+  }
+  .reco .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .reco .head .h { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
+  .reco .action {
+    font-family: 'Syne', sans-serif;
+    font-size: 32px; font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+  }
+  .reco .action.PASS          { color: var(--red); }
+  .reco .action.MONITOR       { color: var(--orange); }
+  .reco .action.INVEST        { color: var(--teal); }
+  .reco .action.STRONG_INVEST { color: var(--green); }
+  .reco .conf {
+    font-size: 11px; letter-spacing: 1.5px;
+    color: var(--muted); text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .reco .rationale {
+    font-size: 13px; color: var(--text); line-height: 1.55;
+    margin-bottom: 14px;
+  }
+  .reco .conditions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .reco .cond-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .reco .cond-block .lbl { font-size: 9px; letter-spacing: 1.5px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+  .reco .cond-block.up .lbl   { color: var(--green); }
+  .reco .cond-block.down .lbl { color: var(--red);   }
+  .reco .cond-block ul { padding-left: 16px; margin: 0; font-size: 12px; color: var(--text); line-height: 1.5; }
+  .reco .cond-block li { margin-bottom: 4px; }
+
+  /* v2.1: Risk taxonomy breakdown */
+  .risk-breakdown {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-top: 12px;
+  }
+  .risk-breakdown .head { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 14px; }
+  .risk-breakdown .grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+  }
+  .risk-breakdown .cell {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 8px;
+    text-align: center;
+  }
+  .risk-breakdown .cell .lbl { font-size: 9px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+  .risk-breakdown .cell .val { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 800; line-height: 1; margin: 6px 0; }
+  .risk-breakdown .cell .reason { font-size: 10px; color: var(--muted); line-height: 1.4; min-height: 56px; }
+
+  /* v2.1: Key Facts panel (Wikidata) */
+  .key-facts {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 12px;
+  }
+  .key-facts .head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; letter-spacing: 2px; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .key-facts .source-tag {
+    font-size: 9px; color: var(--green); border: 1px solid var(--green);
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .key-facts .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px;
+  }
+  .key-facts .fact .fk { font-size: 9px; letter-spacing: 1.2px; color: var(--muted); text-transform: uppercase; }
+  .key-facts .fact .fv { font-size: 14px; color: var(--text); margin-top: 2px; word-break: break-word; }
+
+  /* v2.1: Key Numbers + contradictions */
+  .numbers {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 12px;
+  }
+  .numbers .head { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; }
+  .numbers .metric-row { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .numbers .metric-row:last-child { border-bottom: none; }
+  .numbers .m-name { width: 110px; color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
+  .numbers .m-vals { flex: 1; color: var(--text); display: flex; gap: 12px; flex-wrap: wrap; }
+  .numbers .m-val { background: var(--bg); padding: 4px 8px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+  .numbers .m-val.t1 { border-left: 3px solid var(--green); }
+  .numbers .m-val.t2 { border-left: 3px solid var(--teal); }
+  .numbers .m-val.t3 { border-left: 3px solid var(--purple); }
+  .numbers .m-val.t4 { border-left: 3px solid var(--orange); }
+  .numbers .m-val.t5 { border-left: 3px solid var(--red); }
+  .numbers .contradiction { background: rgba(255,90,107,0.08); border: 1px solid var(--red); border-radius: 8px; padding: 10px 14px; margin-top: 10px; }
+  .numbers .contradiction .c-h { font-size: 10px; letter-spacing: 1.5px; color: var(--red); text-transform: uppercase; margin-bottom: 4px; }
+  .numbers .contradiction .c-b { font-size: 12px; color: var(--text); line-height: 1.5; }
+
+  /* v2.1: Adversarial counter-arguments */
+  .adversarial {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 12px;
+  }
+  .adversarial .head { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; }
+  .adversarial .counter { background: var(--bg); border-left: 3px solid var(--orange); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px; font-size: 12px; line-height: 1.5; }
+  .adversarial .counter .cd { font-size: 9px; letter-spacing: 1px; color: var(--orange); text-transform: uppercase; margin-bottom: 4px; }
+  .adversarial .counter .cdelta { color: var(--red); font-weight: 700; margin-left: 6px; }
+
+  /* v2.1: Time burst */
+  .burst-tag {
+    display: inline-block; font-size: 10px; letter-spacing: 1px;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+    margin-left: 8px;
+  }
+  .burst-tag.detected { color: var(--red); border: 1px solid var(--red); }
+  .burst-tag.clean    { color: var(--muted); border: 1px solid var(--border); }
+
+  /* v2.1 H: Source-diversity radar (SVG) */
+  .radar-panel {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-top: 12px;
+  }
+  .radar-panel .head { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+  .radar-panel svg { display: block; margin: 0 auto; }
+  .radar-panel .legend { font-size: 10px; color: var(--muted); text-align: center; margin-top: 4px; }
+
   /* per-score: tier badge on each score card */
   .score .tier-badge {
     display: inline-block; font-size: 9px; letter-spacing: 1px;
@@ -567,6 +709,61 @@
       </div>
     </div>
 
+    <!-- v2.1: Recommendation matrix -->
+    <div class="reco" id="r-reco" style="display:none;">
+      <div class="head">
+        <div class="h">Investment Recommendation · v2.1</div>
+      </div>
+      <div class="action" id="r-reco-action">—</div>
+      <div class="conf" id="r-reco-conf">—</div>
+      <div class="rationale" id="r-reco-rationale">—</div>
+      <div class="conditions">
+        <div class="cond-block up">
+          <div class="lbl">↑ Upgrade if</div>
+          <ul id="r-reco-up"></ul>
+        </div>
+        <div class="cond-block down">
+          <div class="lbl">↓ Downgrade if</div>
+          <ul id="r-reco-down"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- v2.1: Risk taxonomy breakdown -->
+    <div class="risk-breakdown" id="r-risk-bd" style="display:none;">
+      <div class="head">Risk Breakdown · 5 sub-scores</div>
+      <div class="grid" id="r-risk-bd-grid"></div>
+    </div>
+
+    <!-- v2.1: Key Facts (Wikidata) -->
+    <div class="key-facts" id="r-facts" style="display:none;">
+      <div class="head">
+        <span>Key Facts <span class="burst-tag" id="r-burst-tag"></span></span>
+        <span class="source-tag" id="r-facts-source">Wikidata · T1</span>
+      </div>
+      <div class="grid" id="r-facts-grid"></div>
+    </div>
+
+    <!-- v2.1: Key Numbers + contradictions -->
+    <div class="numbers" id="r-numbers" style="display:none;">
+      <div class="head">Key Numbers · extracted from sources</div>
+      <div id="r-numbers-rows"></div>
+      <div id="r-contradictions"></div>
+    </div>
+
+    <!-- v2.1: Adversarial counter-arguments -->
+    <div class="adversarial" id="r-adversarial" style="display:none;">
+      <div class="head">Adversarial Counter-Arguments · steelmanned skeptic</div>
+      <div id="r-adversarial-list"></div>
+    </div>
+
+    <!-- v2.1 H: Source-diversity radar -->
+    <div class="radar-panel" id="r-radar" style="display:none;">
+      <div class="head">Source Diversity Radar · by dimension</div>
+      <svg id="r-radar-svg" width="320" height="280" viewBox="0 0 320 280"></svg>
+      <div class="legend">Each axis is a research dimension. Distance from center = tier coverage (0–1).</div>
+    </div>
+
     <div class="trace" id="r-trace">
       <div class="head">
         <div class="h">Agent Trace — wall-clock timing</div>
@@ -748,8 +945,228 @@
     document.getElementById("r-bench").textContent = benchTxt;
 
     renderTrace(r);
+    renderRecommendation(r);
+    renderRiskBreakdown(r);
+    renderKeyFacts(r);
+    renderNumbers(r);
+    renderAdversarial(r);
+    renderRadar(r);
 
     report.classList.add("show");
+  }
+
+  // v2.1: Investment recommendation matrix
+  function renderRecommendation(r) {
+    const rc = r.recommendation || {};
+    const el = document.getElementById("r-reco");
+    if (!rc.action) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    const actionEl = document.getElementById("r-reco-action");
+    actionEl.textContent = (rc.action || "").replace("_", " ");
+    actionEl.className = "action " + (rc.action || "");
+    document.getElementById("r-reco-conf").textContent = "Confidence: " + (rc.confidence || "—");
+    document.getElementById("r-reco-rationale").textContent = rc.rationale || "";
+    const ul = (id, items) => {
+      const u = document.getElementById(id);
+      u.innerHTML = "";
+      (items || []).forEach(x => {
+        const li = document.createElement("li");
+        li.textContent = x;
+        u.appendChild(li);
+      });
+    };
+    ul("r-reco-up", rc.upgrade_conditions);
+    ul("r-reco-down", rc.downgrade_conditions);
+  }
+
+  // v2.1: Risk taxonomy breakdown
+  function renderRiskBreakdown(r) {
+    const bd = ((r.scores || {}).risk || {}).breakdown;
+    const el = document.getElementById("r-risk-bd");
+    if (!bd) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    const grid = document.getElementById("r-risk-bd-grid");
+    grid.innerHTML = "";
+    const subs = [
+      ["regulatory", "Regulatory"],
+      ["competitive", "Competitive"],
+      ["execution", "Execution"],
+      ["financial", "Financial"],
+      ["ip_legal", "IP / Legal"],
+    ];
+    subs.forEach(([key, label]) => {
+      const sub = bd[key] || {};
+      const score = Number(sub.score ?? 0);
+      const color = colorForScore(score, true);
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.innerHTML = `
+        <div class="lbl">${label}</div>
+        <div class="val" style="color:${color}">${score}</div>
+        <div class="reason">${escapeHtml(sub.reasoning || "")}</div>
+      `;
+      grid.appendChild(cell);
+    });
+  }
+
+  // v2.1: Key Facts (Wikidata)
+  function renderKeyFacts(r) {
+    const f = r.wikidata_facts || {};
+    const el = document.getElementById("r-facts");
+    const grid = document.getElementById("r-facts-grid");
+    const burst = document.getElementById("r-burst-tag");
+    const hasFacts = Object.keys(f).some(k => !k.startsWith("_"));
+    if (!hasFacts) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    grid.innerHTML = "";
+    const order = ["inception", "headquarters", "ceo", "founder", "employees",
+                   "industry", "country", "official_website", "ticker_symbol", "stock_exchange"];
+    order.forEach(key => {
+      if (!(key in f)) return;
+      const cell = document.createElement("div");
+      cell.className = "fact";
+      cell.innerHTML = `
+        <div class="fk">${key.replace(/_/g, " ")}</div>
+        <div class="fv">${escapeHtml(String(f[key]))}</div>
+      `;
+      grid.appendChild(cell);
+    });
+    const tb = r.time_burst || {};
+    if (tb.burst_detected) {
+      burst.textContent = `BURST · ${Math.round((tb.fraction || 0) * 100)}% in ${tb.peak_month}`;
+      burst.className = "burst-tag detected";
+    } else if ((tb.total_dated_signals || 0) >= 4) {
+      burst.textContent = "coverage spread";
+      burst.className = "burst-tag clean";
+    } else {
+      burst.textContent = "";
+      burst.className = "burst-tag";
+    }
+  }
+
+  // v2.1: Key Numbers + contradictions
+  function renderNumbers(r) {
+    const summary = r.numerical_summary || {};
+    const contras = r.numerical_contradictions || [];
+    const el = document.getElementById("r-numbers");
+    const rows = document.getElementById("r-numbers-rows");
+    const contraEl = document.getElementById("r-contradictions");
+    const keys = Object.keys(summary);
+    if (keys.length === 0 && contras.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    rows.innerHTML = "";
+    keys.forEach(metric => {
+      const claims = summary[metric] || [];
+      const row = document.createElement("div");
+      row.className = "metric-row";
+      const vals = claims.map(c => {
+        const v = (c.value_millions_usd != null)
+          ? formatMoney(c.value_millions_usd)
+          : String(c.value);
+        const host = hostnameOf(c.source_url);
+        return `<span class="m-val t${c.source_tier}" title="${escapeAttr(c.raw_phrase || "")}&#10;${escapeAttr(c.source_url || "")}">${escapeHtml(v)} · ${escapeHtml(host)}</span>`;
+      }).join("");
+      row.innerHTML = `<div class="m-name">${metric.replace(/_/g, " ")}</div><div class="m-vals">${vals}</div>`;
+      rows.appendChild(row);
+    });
+    contraEl.innerHTML = "";
+    contras.forEach(c => {
+      const div = document.createElement("div");
+      div.className = "contradiction";
+      const isMoney = c.metric === "revenue" || c.metric === "funding" || c.metric === "valuation";
+      const lo = isMoney ? formatMoney(c.low_value) : c.low_value;
+      const hi = isMoney ? formatMoney(c.high_value) : c.high_value;
+      div.innerHTML = `
+        <div class="c-h">⚠ Contradiction · ${escapeHtml(c.metric)}</div>
+        <div class="c-b">
+          <strong>${escapeHtml(String(lo))}</strong> per ${escapeHtml(hostnameOf(c.low_source || ""))}
+          vs <strong>${escapeHtml(String(hi))}</strong> per ${escapeHtml(hostnameOf(c.high_source || ""))}
+          · ${c.percent_difference}% discrepancy
+        </div>
+      `;
+      contraEl.appendChild(div);
+    });
+  }
+
+  // v2.1: Adversarial counter-arguments
+  function renderAdversarial(r) {
+    const adv = r.adversarial || {};
+    const counters = adv.counter_arguments || [];
+    const el = document.getElementById("r-adversarial");
+    const list = document.getElementById("r-adversarial-list");
+    if (counters.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    list.innerHTML = "";
+    counters.forEach(c => {
+      const div = document.createElement("div");
+      div.className = "counter";
+      const delta = (c.suggested_adjustment != null)
+        ? `<span class="cdelta">Δ ${Number(c.suggested_adjustment).toFixed(1)}</span>`
+        : "";
+      div.innerHTML = `
+        <div class="cd">vs ${escapeHtml(c.dimension || "")}${delta}</div>
+        ${escapeHtml(c.counter || "")}
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  // v2.1 H: Source-diversity radar
+  function renderRadar(r) {
+    const tri = r.triangulation_per_dimension || {};
+    const el = document.getElementById("r-radar");
+    const svg = document.getElementById("r-radar-svg");
+    const dims = [
+      ["founder_signals", "Team"],
+      ["traction_signals", "Traction"],
+      ["market_signals", "Market"],
+      ["risk_signals", "Risk"],
+    ];
+    if (dims.every(([k, _]) => !(k in tri))) { el.style.display = "none"; return; }
+    el.style.display = "block";
+
+    const cx = 160, cy = 140, maxR = 100;
+    const n = dims.length;
+    const ringSteps = [0.25, 0.5, 0.75, 1.0];
+    let html = "";
+
+    ringSteps.forEach(s => {
+      html += `<circle cx="${cx}" cy="${cy}" r="${maxR * s}" fill="none" stroke="#22222e" stroke-width="1"/>`;
+    });
+    dims.forEach(([_, label], i) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / n;
+      const x = cx + maxR * Math.cos(angle);
+      const y = cy + maxR * Math.sin(angle);
+      html += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#22222e" stroke-width="1"/>`;
+      const lx = cx + (maxR + 22) * Math.cos(angle);
+      const ly = cy + (maxR + 22) * Math.sin(angle) + 4;
+      html += `<text x="${lx}" y="${ly}" text-anchor="middle" font-family="Space Mono, monospace" font-size="10" fill="#8b8ba0" letter-spacing="1.5">${label.toUpperCase()}</text>`;
+    });
+    const pts = dims.map(([key, _], i) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / n;
+      const v = Number(tri[key] ?? 0);
+      const r2 = maxR * Math.max(0, Math.min(1, v));
+      return [cx + r2 * Math.cos(angle), cy + r2 * Math.sin(angle)];
+    });
+    const pointsAttr = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    html += `<polygon points="${pointsAttr}" fill="rgba(124,109,250,0.18)" stroke="#7c6dfa" stroke-width="2"/>`;
+    pts.forEach(([x, y]) => {
+      html += `<circle cx="${x}" cy="${y}" r="3" fill="#00d4aa"/>`;
+    });
+    svg.innerHTML = html;
+  }
+
+  function formatMoney(millions) {
+    const m = Number(millions || 0);
+    if (m >= 1000) return `$${(m / 1000).toFixed(1)}B`;
+    if (m >= 1) return `$${m.toFixed(0)}M`;
+    if (m > 0) return `$${(m * 1000).toFixed(0)}K`;
+    return "—";
+  }
+
+  function hostnameOf(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ""); }
+    catch (e) { return (url || "").slice(0, 30); }
   }
 
   function renderTruthPanel(r) {
